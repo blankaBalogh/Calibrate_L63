@@ -76,7 +76,7 @@ yt_truth = np.load('dataset/yt_truth.npz')['arr_0']
 
 
 # -------------------------------------------------------------------------------- #
-# ----------------    2nd EXPERIMENT : LEARNING dx_3 = f(x,beta)   --------------- #
+# ----------------    2nd EXPERIMENT : LEARNING dx = f(x,theta)   ---------------- #
 # -------------------------------------------------------------------------------- #
 print('***** 2nd experiment : learning to predict full y_data. ***** ')
 print(' ------- Loading learning samples ------- ')
@@ -107,7 +107,7 @@ if tag=='-a1' :
 
 
 # --- Learning fhat_betas
-print('\n ------ Learning fhat_betas ------- ')
+print('\n ------ Learning fhat_thetas ------- ')
 # Normalization of x & y data
 mean_x, std_x = np.mean(x_data, axis=0), np.std(x_data, axis=0)
 mean_y, std_y = np.mean(y_data, axis=0), np.std(y_data, axis=0)
@@ -148,6 +148,8 @@ n_steps_loss, n_snapshots = 200, 50
 x0 = np.zeros((n_snapshots, 6))
 index_valid = np.random.randint(0, xt_truth.shape[0]-1, n_snapshots)
 x0[...,:3] = xt_truth[index_valid]
+#x0[...,3:] = np.repeat([10.,28.,8/3], 50).reshape(3, n_snapshots).T
+
 dt = 0.05
 
 comp_loss_data = compute_loss_data(nn_L63, xt_truth, x0=x0, n_steps=n_steps_loss, 
@@ -189,23 +191,25 @@ if new_gp_ls :
                 extra_tag+'.npz', errors)
 
 else :
+    thetas_list = np.load('dataset/thetas_errors/train_thetas_gp'+tag+tag_m+\
+            extra_tag+'.npz')['arr_0']
     errors = np.load('dataset/thetas_errors/train_errors_gp'+tag+tag_m+'.npz')['arr_0']
 
 # fitting GP
 gp = GaussianProcessRegressor()
-betas_list = betas_list.reshape(-1,1)
-gp.fit(betas_list, errors)
+thetas_list = thetas_list.reshape(-1,3)
+gp.fit(thetas_list, errors)
 
 print('\n -------  Optimization  -------')
 
 loss_kriging = compute_loss_kriging(gp)
 
 theta_to_update = [9.5, 28.5, 2.5]
-print(' > initial beta value : %f.'%theta_to_update)
+print(' > initial theta value : ', theta_to_update)
 res = minimize(loss_kriging, theta_to_update, method='BFGS', tol=1e-2, 
         callback=callbackF, options={'eps':1e-3})
 
-print(' > optimal beta value : ', res.x)
+print(' > optimal theta value : ', res.x)
 
 
 
@@ -217,7 +221,7 @@ if gen_valid_orbit :
     x0 = xt_truth[0]
     # Generation of a (long) validation orbit 
     print(' > Generating a validation orbit...')
-    val_orb = generate_data(nn_L63, x0, betas=res.x, n_steps=60000, dt=dt,
+    val_orb = generate_data(nn_L63, x0, thetas=res.x, n_steps=60000, dt=dt,
             compute_y=False, sigmai=10., rhoi=28.)
     xt_valid = val_orb['x']
     np.savez_compressed('dataset/validation_orbit_kriging-'+learning_sample+'.npz', 

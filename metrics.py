@@ -46,9 +46,8 @@ def compute_loss_data(nn_L63, xt_truth, x0=[0.,0.,1.,10.,28.,8/3],
     def loss_fun(theta_to_update) :
         '''
         '''
-        thetas = np.repeat(theta_to_update, n_snapshots)
+        thetas = np.repeat(theta_to_update, n_snapshots).reshape(3, n_snapshots).T
         x0[...,3:] = thetas
-
         output = generate_data(nn_L63, x0, n_steps=200, dt=dt, compute_y=False)
         xt_pred = output['x']
         
@@ -79,7 +78,7 @@ def compute_loss_kriging(gp) :
         '''
         '''
         theta_ = np.array([theta_to_update])
-        print('Optimal theta value : %f.' % theta_)
+        print('Optimal theta value : ', theta_)
 
         err = gp.predict(theta_) 
         return err[0,0]
