@@ -76,25 +76,18 @@ class ML_model():
         '''
         '''
         def func(x) :
-            theta = x[:, 3:]
-            x = x[:, :3]
+            if self.norms is not None :
+                x = (x-self.norms[0])/self.norms[2]
+        
+            x_, theta_ = x[:, :3], x[:,3:]
 
             ishp1 = x.shape
-            if theta is not None :
-                ishp2 = theta.shape
 
             if len(ishp1)==1 :
-                x = np.reshape(x, (-1, 3))
-            
-            if not (self.in_dim-3)==0 :
-                theta_ = np.reshape(theta, (-1, (self.in_dim-3)))
-                       
-            if self.out_dim == 3 :
-                if self.norms is not None:
-                    x_ = (x - self.norms[0]) / self.norms[2]
-                else:
-                    x_ = x
-                
+                x_ = np.reshape(x_, (-1, 3))
+                theta_ = np.reshape(theta_, (-1, (self.in_dim-3)))
+
+            if self.out_dim == 3 : 
                 if not (self.in_dim-3)==0 :
                     y_ = self.model.predict_on_batch([x_, theta_])
                 else :
