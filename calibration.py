@@ -39,12 +39,15 @@ parser.add_argument('-o', '--optimisation', type=int, default=1,
         help='Optimization selection : kriging (=1) or raw (=2).')
 parser.add_argument('-gp', '--new_gp_ls', default=False, 
         action='store_true', help='New GP LS or not ?')
+parser.add_argument('-et', '--extra_tag', type=str, default='', 
+        help='Adds an extra tag. Useful to save new datasets.')
 
 args    = parser.parse_args()
 
 tag = '-a'+str(args.learning_sample)
 tag_m = '-m'+str(args.metric)
 tag_o = '-o'+str(args.optimisation)
+extra_tag = args.extra_tag
 
 new_gp_ls = args.new_gp_ls
 
@@ -92,8 +95,8 @@ truth_sigma, truth_rho = 10., 28.
 # Loading 'orbits' learning sample
 if tag=='-a2' :
     print(' > Loading learning sample of orbits.')
-    x_data = np.load('dataset/x_data-a2.npz')['arr_0']
-    y_data = np.load('dataset/y_data-a2.npz')['arr_0'][...,:3]
+    x_data = np.load('dataset/x_data-a2'+extra_tag+'.npz')['arr_0']
+    y_data = np.load('dataset/y_data-a2'+extra_tag+'.npz')['arr_0'][...,:3]
     x_data, y_data = np.swapaxes(x_data,0,1), np.swapaxes(y_data,0,1) 
     x_data = x_data.reshape(-1, x_data.shape[-1])
     y_data = y_data.reshape(-1, y_data.shape[-1])
@@ -101,9 +104,8 @@ if tag=='-a2' :
 # Loading lhs learning sample
 if tag=='-a1' :
     print(' > Loading learning sample of LHS sample.')
-    x_data = np.load('dataset/x_data-a1.npz')['arr_0'][0]
-    y_data = np.load('dataset/y_data-a1.npz')['arr_0'][0][...,:3]
-    #th_data = np.load('dataset/th_data-a1.npz')['arr_0']
+    x_data = np.load('dataset/x_data-a1'+extra_tag+'.npz')['arr_0'][0]
+    y_data = np.load('dataset/y_data-a1'+extra_tag+'.npz')['arr_0'][0][...,:3]
 
 
 # --- Learning fhat_betas
@@ -111,31 +113,23 @@ print('\n ------ Learning fhat_thetas ------- ')
 # Normalization of x & y data
 mean_x, std_x = np.mean(x_data, axis=0), np.std(x_data, axis=0)
 mean_y, std_y = np.mean(y_data, axis=0), np.std(y_data, axis=0)
-x_data[:,:3] = (x_data[:,:3]-mean_x[:3])/std_x[:3]
+x_data = (x_data-mean_x)/std_x
 y_data = (y_data-mean_y)/std_y
 
 # Setting up NN model
 layers = [64, 32, 16]
-n_epochs = 2
 
 print('y data shape : ', y_data.shape)
 
 dic_NN = {'name':'f_orb', 'in_dim':x_data.shape[1], 'out_dim':y_data.shape[1], 
         'nlays':layers}
 nn_L63 = ML_model(dic_NN)
-nn_L63.norms = [mean_x[:3], mean_y[-1], std_x[:3], std_y[-1]]
-nn_L63.suffix = '-testScript' 
+nn_L63.norms = [mean_x, mean_y, std_x, std_y]
+nn_L63.suffix = tag+extra_tag
 print(nn_L63.model.summary())
-
-train_model = False
-if train_model :
-    print(' > Training NN model.')
-    train_ML_model(x_data, y_data, nn_L63, batch_size=32, n_epochs=n_epochs, 
-            split_mode='beta', split_ratio=0.15)
 
 print(' > Loading model weights.')
 nn_L63.model.load_weights('weights/weights'+nn_L63.suffix+'.h5')
-
 
 
 if tag_m == '-m2' :
@@ -153,7 +147,7 @@ x0[...,:3] = xt_truth[index_valid]
 dt = 0.05
 
 comp_loss_data = compute_loss_data(nn_L63, xt_truth, x0=x0, n_steps=n_steps_loss, 
-        dt=0.05, alpha=alpha)
+        dt=0.05, alpha=alpha, tag=tag, extra_tag=extra_tag)
 n_iter = 0
 
 def callbackF(x_) :
@@ -167,49 +161,63 @@ def callbackF(x_) :
     n_iter += 1
 
 
-print('\n ------- Defining and fitting GP regressor ------- ')
-from sklearn.gaussian_process import GaussianProcessRegressor
+if tag_o=='-o1' :
+    print('\n ------- Defining and fitting GP regressor ------- ')
+    from sklearn.gaussian_process import GaussianProcessRegressor
+    from sklearn.gaussian_process.kernels import Matern
 
-n_samples = 150
-min_bounds, max_bounds = np.array([9.,27.,2.]), np.array([11., 29., 3.2])
-thetas_list = lhs(3, samples=n_samples)*(max_bounds-min_bounds)+min_bounds
-saving_gp = True
+    n_samples = 150
+    min_bounds, max_bounds = np.array([9.,26.5,2.]), np.array([11., 29., 3.])
+    thetas_list = lhs(3, samples=n_samples)*(max_bounds-min_bounds)+min_bounds
+    saving_gp = True
 
-if new_gp_ls :
-    extra_tag = ''
-    errors = np.zeros((n_samples, 1)) * np.nan
+    if new_gp_ls :
+        errors = np.zeros((n_samples, 1)) * np.nan
 
-    for (i,theta) in enumerate(thetas_list) :
-        print(' > err. no.%d/%d.' % ((i+1), n_samples))
-        errors[i,0] = comp_loss_data(theta)
+        for (i,theta) in enumerate(thetas_list) :
+            print(' > err. no.%d/%d.' % ((i+1), n_samples))
+            errors[i,0] = comp_loss_data(theta, i=i)
 
-    if saving_gp :
-        print(' > Saving GP learning sample.')
-        np.savez_compressed('dataset/thetas_errors/train_thetas_gp'+tag+tag_m+ \
-                extra_tag+'.npz', thetas_list)
-        np.savez_compressed('dataset/thetas_errors/train_errors_gp'+tag+tag_m+ \
-                extra_tag+'.npz', errors)
+        if saving_gp :
+            print(' > Saving GP learning sample.')
+            np.savez_compressed('dataset/thetas_errors/train_thetas_gp'+tag+tag_m+ \
+                    extra_tag+'.npz', thetas_list)
+            np.savez_compressed('dataset/thetas_errors/train_errors_gp'+tag+tag_m+ \
+                    extra_tag+'.npz', errors)
+
+    else :
+        thetas_list = np.load('dataset/thetas_errors/train_thetas_gp'+tag+tag_m+\
+                extra_tag+'.npz')['arr_0']
+        errors = np.load('dataset/thetas_errors/train_errors_gp'+tag+tag_m+ \
+                extra_tag+'.npz')['arr_0']
+
+    # fitting GP 
+    kernel = Matern(length_scale=1.0, nu=1.5)       # Definition of Matern kernel
+    gp = GaussianProcessRegressor(kernel=kernel, random_state=42)
+    thetas_list = thetas_list.reshape(-1,3)
+    gp.fit(thetas_list, errors)
+
+    print('\n -------  Optimization  -------')
+
+    loss_kriging = compute_loss_kriging(gp)
+
+    theta_to_update = [9.5, 28.5, 2.1]
+    print(' > initial theta value : ', theta_to_update)
+    res = minimize(loss_kriging, theta_to_update, method='BFGS', tol=1e-1, 
+            callback=callbackF, options={'eps':1e-2})
+
+    print(' > optimal theta value : ', res.x)
 
 else :
-    thetas_list = np.load('dataset/thetas_errors/train_thetas_gp'+tag+tag_m+\
-            extra_tag+'.npz')['arr_0']
-    errors = np.load('dataset/thetas_errors/train_errors_gp'+tag+tag_m+'.npz')['arr_0']
+    print('\n ------- Optimization on raw data ------- ')
+    loss_fun = compute_loss_data(nn_L63, xt_truth, x0=x0, n_steps=n_steps_loss, 
+            dt=0.05, alpha=alpha)
+    theta_to_update = [9.5, 28.5, 2.1]
+    print(' > initial theta value : ', theta_to_update)
+    res = minimize(loss_fun, theta_to_update, method='BFGS', tol=1e-1, 
+            callback=callbackF, options={'eps':1e-2})
+    print(' > optimal theta value : ', res.x)
 
-# fitting GP
-gp = GaussianProcessRegressor()
-thetas_list = thetas_list.reshape(-1,3)
-gp.fit(thetas_list, errors)
-
-print('\n -------  Optimization  -------')
-
-loss_kriging = compute_loss_kriging(gp)
-
-theta_to_update = [9.5, 28.5, 2.5]
-print(' > initial theta value : ', theta_to_update)
-res = minimize(loss_kriging, theta_to_update, method='BFGS', tol=1e-2, 
-        callback=callbackF, options={'eps':1e-3})
-
-print(' > optimal theta value : ', res.x)
 
 
 
