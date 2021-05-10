@@ -77,6 +77,8 @@ class ML_model():
         '''
         def func(x) :
             if self.norms is not None :
+                len_input = len(self.norms[0])
+                raw_x, x = np.copy(x), x[:,:len_input]
                 x = (x-self.norms[0])/self.norms[2]
         
             x_, theta_ = x[:, :3], x[:,3:]
@@ -99,18 +101,16 @@ class ML_model():
                     y__ = y_
 
 
-            elif self.out_dim == 1 :
-                sigma, rho, beta = x[:,3], x[:,4], x[:,5]
+            elif self.out_dim == 1 : 
+                sigma, rho, beta = x[:,3], raw_x[:,4], raw_x[:,5]
 
                 y_ = np.zeros(x.shape)[...,:3]
                 y_[..., 0] = sigma * (x[:, 1] - x[:, 0])
                 y_[..., 1] = rho*x[:, 0] - x[:, 1] - x[:, 0]*x[:, 2]
                 
                 if self.norms is not None :
-                    x_ = (x - self.norms[0])/self.norms[2]
-
                     if not (self.in_dim-3) == 0 :
-                        pred = self.model.predict_on_batch([x_, betas_])
+                        pred = self.model.predict_on_batch([x_, theta_])
                     else :
                         pred = self.model.predict_on_batch(x_)
 
@@ -121,7 +121,7 @@ class ML_model():
 
                 else :
                     if not (self.in_dim-3) == 0 :
-                        y_[..., 2] = self.model.predict_on_batch([x, betas_])
+                        y_[..., 2] = self.model.predict_on_batch([x, theta_])
                     else :
                         y_[..., 2] = self.model.predict_on_batch(x)
 

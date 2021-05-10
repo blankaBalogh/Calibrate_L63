@@ -91,7 +91,7 @@ def formal_ode_solver(f, x0, time, method='RK4', x_bounds=None, verbose=False):
     if method == 'RK4':
         for i in range(sTime):
             h = time[i+1] - time[i]
-            k1 = f(solution[i, ista], time[i])
+            k1 = f(solution[i, ista], time[i]) 
             k2 = f(solution[i, ista] + 0.5 * h * k1, time[i] + 0.5*h)
             k3 = f(solution[i, ista] + 0.5 * h * k2, time[i] + 0.5*h)
             k4 = f(solution[i, ista] + h * k3, time[i+1])

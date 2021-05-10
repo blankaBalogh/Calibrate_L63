@@ -32,7 +32,7 @@ def dist_L2() :
 # Loss functions
 # Validation orbit generated + loss computed over it
 def compute_loss_data(nn_L63, xt_truth, x0=[0.,0.,1.,10.,28.,8/3], 
-        n_steps=200, dt=0.05, alpha=1.) :
+        n_steps=200, dt=0.05, alpha=1., tag='', extra_tag='') :
     '''
     Loss function.
     '''
@@ -43,12 +43,13 @@ def compute_loss_data(nn_L63, xt_truth, x0=[0.,0.,1.,10.,28.,8/3],
     elif alpha == 1. :
         print(' > metric : STD only.')
 
-    def loss_fun(theta_to_update) :
+    def loss_fun(theta_to_update, i=0) :
         '''
         '''
-        thetas = np.repeat(theta_to_update, n_snapshots).reshape(3, n_snapshots).T
+        n_features = len(theta_to_update)
+        thetas = np.repeat(theta_to_update, n_snapshots).reshape(n_features, n_snapshots).T
         x0[...,3:] = thetas
-        output = generate_data(nn_L63, x0, n_steps=200, dt=dt, compute_y=False)
+        output = generate_data(nn_L63, x0, n_steps=20000, dt=dt, compute_y=False)
         xt_pred = output['x']
         
         mean_hat_x = np.mean(xt_pred[...,:3], axis=(0,1))
@@ -69,7 +70,7 @@ def compute_loss_data(nn_L63, xt_truth, x0=[0.,0.,1.,10.,28.,8/3],
 
 
 # Loss function for kriging
-def compute_loss_kriging(gp) :
+def compute_loss_kriging(gp, norm_gp=False, norms=None) :
     '''
     Loss function to optimize beta value after kriging. 
     '''
@@ -79,8 +80,15 @@ def compute_loss_kriging(gp) :
         '''
         theta_ = np.array([theta_to_update])
         print('Optimal theta value : ', theta_)
+        
+        if norm_gp :
+            theta_ = (theta_-norms[0])/norms[2]
 
-        err = gp.predict(theta_) 
+        err = gp.predict(theta_)
+
+        if norm_gp :
+            err = norms[3]*err + norms[1]
+
         return err[0,0]
 
     return loss_fun

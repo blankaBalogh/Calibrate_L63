@@ -25,43 +25,50 @@ if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('-exp', '--experience', type=str, default='3d', 
             help="exp. type : 'std', '1d' or '3d'.")
-    parser.add_argument('-1ts', '--ls_1ts', default=False, action='store_true',
-            help='Enables the creation of an 1ts learning sample.')
+    parser.add_argument('-a', '--learning_sample', type=int, default=1, 
+            help='Type of learning sample.')
+    parser.add_argument('-n_ic', '--N_ic', type=int, default=1, 
+            help='Number of initial conditions.')
+    parser.add_argument('-n_ts', '--N_ts', type=int, default=100, 
+            help='Number of time steps in the orbit.')
+    parser.add_argument('-et', '--extra_tag', type=str, default='', 
+            help='Extra tag to identify the obtained dataset.')
+
     
     args = parser.parse_args()
     
     truth_sigma, truth_rho, truth_beta = 10., 28., 8/3
     
-    exp = args.experience # 'std' or '1d'
-    l1ts = args.ls_1ts
-    
-    N_ic = 100  # Number of 'initial conditions + parameters' to sample
-    min_bounds = np.array([-10, -10, 10,  9, 26.5, 1.5])
-    max_bounds = np.array([ 10,  10, 30, 10, 29.5, 3.0])
+    exp = args.experience #'std' or '1d'
+    extra_tag = args.extra_tag
+    tag = '-a'+str(args.learning_sample)
+    N_ts = args.N_ts  # MTUs (with 100 MTUs = 1 year)
+    N_ic = args.N_ic  # Number of 'initial conditions + parameters' to sample
+   
+    min_bounds = np.array([-35., -35., 0.,  9., 26.5, 1.5])
+    max_bounds = np.array([ 35.,  35., 70., 11., 29.5, 3.0])
     
     if exp == 'std':
         min_bounds[3:6] = np.array([truth_sigma, truth_rho, truth_beta])
         max_bounds[3:6] = np.array([truth_sigma, truth_rho, truth_beta])
 
     if exp == '1d':
+        extra_tag = extra_tag+'-1d'
         min_bounds[3:5] = np.array([truth_sigma, truth_rho])
         max_bounds[3:5] = np.array([truth_sigma, truth_rho])
         
     dt = 0.05
-    N_ts = 100 # MTUs (with 100 MTUs = 1 year)
-    if not l1ts:
+    if tag=='-a2' :
         N_steps = int(N_ts/dt)  # Number of timesteps in the orbit
-        tag = '-a2'
-    else :
-        N_ic = 25000 
+
+    else : 
         N_steps = 1
-        tag = '-a1'
         
     x_data, y_data = create_dataset(min_bounds, max_bounds, N_ic=N_ic, N_steps=N_steps, dt=dt)
 
     root = 'dataset/'
-    fname = root+'x_data'+tag+'.npz'
+    fname = root+'x_data'+tag+extra_tag+'.npz'
     np.savez_compressed(fname, x_data)
-    np.savez_compressed(root+'y_data'+tag+'.npz', y_data)
+    np.savez_compressed(root+'y_data'+tag+extra_tag+'.npz', y_data)
     print(' > Dataset of size ', y_data.shape, 
             ' successfully saved to %s.'% fname)

@@ -41,6 +41,8 @@ parser.add_argument('-gp', '--new_gp_ls', default=False,
         action='store_true', help='New GP LS or not ?')
 parser.add_argument('-et', '--extra_tag', type=str, default='', 
         help='Adds an extra tag. Useful to save new datasets.')
+parser.add_argument('-exp', '--experience', type=str, default='3d', 
+        help="Experience type : '3d' or '1d'.")
 
 args    = parser.parse_args()
 
@@ -48,6 +50,9 @@ tag = '-a'+str(args.learning_sample)
 tag_m = '-m'+str(args.metric)
 tag_o = '-o'+str(args.optimisation)
 extra_tag = args.extra_tag
+exp = args.experience
+if exp=='1d' :
+    extra_tag=extra_tag+'-1d'
 
 new_gp_ls = args.new_gp_ls
 
@@ -84,14 +89,6 @@ yt_truth = np.load('dataset/yt_truth.npz')['arr_0']
 print('***** 2nd experiment : learning to predict full y_data. ***** ')
 print(' ------- Loading learning samples ------- ')
 
-"""
-dt = 0.05
-N_ic =  100             # Number of initial conditions to sample
-N_ts = 100              # 200 ts with dt=0.05 is the equivalent of 1 year of data 
-N_steps = int(N_ts/dt)  # Number of timesteps in the orbit
-truth_sigma, truth_rho = 10., 28.
-"""
-
 # Loading 'orbits' learning sample
 if tag=='-a2' :
     print(' > Loading learning sample of orbits.')
@@ -100,12 +97,20 @@ if tag=='-a2' :
     x_data, y_data = np.swapaxes(x_data,0,1), np.swapaxes(y_data,0,1) 
     x_data = x_data.reshape(-1, x_data.shape[-1])
     y_data = y_data.reshape(-1, y_data.shape[-1])
+    if exp=='1d' :
+        x_data = np.delete(x_data, [3,4], axis=-1)
+        y_data = y_data[:,-1]
+        y_data = y_data.reshape(-1,1)
 
 # Loading lhs learning sample
 if tag=='-a1' :
     print(' > Loading learning sample of LHS sample.')
     x_data = np.load('dataset/x_data-a1'+extra_tag+'.npz')['arr_0'][0]
     y_data = np.load('dataset/y_data-a1'+extra_tag+'.npz')['arr_0'][0][...,:3]
+    if exp=='1d' :
+        x_data = np.delete(x_data, [3,4], axis=-1)
+        y_data = y_data[:,-1]
+        y_data = y_data.reshape(-1,1)
 
 
 # --- Learning fhat_betas
@@ -117,7 +122,7 @@ x_data = (x_data-mean_x)/std_x
 y_data = (y_data-mean_y)/std_y
 
 # Setting up NN model
-layers = [64, 32, 16]
+layers = [256, 128, 64, 32, 16]
 
 print('y data shape : ', y_data.shape)
 
@@ -126,6 +131,7 @@ dic_NN = {'name':'f_orb', 'in_dim':x_data.shape[1], 'out_dim':y_data.shape[1],
 nn_L63 = ML_model(dic_NN)
 nn_L63.norms = [mean_x, mean_y, std_x, std_y]
 nn_L63.suffix = tag+extra_tag
+nn_L63.name = 'model_'+tag+extra_tag
 print(nn_L63.model.summary())
 
 print(' > Loading model weights.')
@@ -142,7 +148,6 @@ n_steps_loss, n_snapshots = 200, 50
 x0 = np.zeros((n_snapshots, 6))
 index_valid = np.random.randint(0, xt_truth.shape[0]-1, n_snapshots)
 x0[...,:3] = xt_truth[index_valid]
-#x0[...,3:] = np.repeat([10.,28.,8/3], 50).reshape(3, n_snapshots).T
 
 dt = 0.05
 
@@ -166,8 +171,14 @@ if tag_o=='-o1' :
     from sklearn.gaussian_process import GaussianProcessRegressor
     from sklearn.gaussian_process.kernels import Matern
 
-    n_samples = 150
-    min_bounds, max_bounds = np.array([9.,26.5,2.]), np.array([11., 29., 3.])
+    if exp=='1d' :
+        n_samples = 50
+        sigma, rho = 10., 28.
+        min_bounds, max_bounds = np.array([sigma, rho, 2.]), np.array([sigma, rho, 3.])
+    else :
+        n_samples = 150
+        min_bounds, max_bounds = np.array([9.,26.5,2.]), np.array([11., 29., 3.])
+
     thetas_list = lhs(3, samples=n_samples)*(max_bounds-min_bounds)+min_bounds
     saving_gp = True
 
@@ -191,49 +202,76 @@ if tag_o=='-o1' :
         errors = np.load('dataset/thetas_errors/train_errors_gp'+tag+tag_m+ \
                 extra_tag+'.npz')['arr_0']
 
-    # fitting GP 
-    kernel = Matern(length_scale=1.0, nu=1.5)       # Definition of Matern kernel
+    # fitting GP
+    mean_thetas, std_thetas = np.mean(thetas_list, axis=0), np.std(thetas_list, axis=0)
+    mean_errors, std_errors = np.mean(errors, axis=0), np.std(errors, axis=0)
+
+    norm_gp = True
+    if norm_gp :
+        thetas_list = (thetas_list-mean_thetas)/std_thetas
+        errors = (errors-mean_errors)/std_errors
+
+    kernel = Matern(length_scale=1., nu=1.)       # Definition of Matern kernel
     gp = GaussianProcessRegressor(kernel=kernel, random_state=42)
     thetas_list = thetas_list.reshape(-1,3)
+    if exp=='1d' :
+        thetas_list : thetas_list[...,-1].reshape(-1,1)
+
     gp.fit(thetas_list, errors)
 
     print('\n -------  Optimization  -------')
 
-    loss_kriging = compute_loss_kriging(gp)
-
-    theta_to_update = [9.5, 28.5, 2.1]
+    norms_gp = [mean_thetas, mean_errors, std_thetas, std_errors]
+    loss_kriging = compute_loss_kriging(gp, norm_gp=norm_gp, norms=norms_gp)
+    
+    if exp=='1d' : 
+        theta_to_update = 2.
+    else :
+        theta_to_update = [9.5, 28.5, 2.5]
     print(' > initial theta value : ', theta_to_update)
-    res = minimize(loss_kriging, theta_to_update, method='BFGS', tol=1e-1, 
-            callback=callbackF, options={'eps':1e-2})
 
-    print(' > optimal theta value : ', res.x)
+    eps, tol = 1e-2, 1e-1
+
+    res = minimize(loss_kriging, theta_to_update, method='BFGS', tol=tol, 
+            callback=callbackF, options={'eps':eps})
+    
+    theta_star = res.x
+
+    print(' > optimal theta value : ', theta_star)
 
 else :
     print('\n ------- Optimization on raw data ------- ')
     loss_fun = compute_loss_data(nn_L63, xt_truth, x0=x0, n_steps=n_steps_loss, 
             dt=0.05, alpha=alpha)
-    theta_to_update = [9.5, 28.5, 2.1]
+    
+    if exp=='1d' :
+        theta_to_update = 2.1
+    else :
+        theta_to_update = [9.5, 28.5, 2.1]
     print(' > initial theta value : ', theta_to_update)
+
     res = minimize(loss_fun, theta_to_update, method='BFGS', tol=1e-1, 
             callback=callbackF, options={'eps':1e-2})
     print(' > optimal theta value : ', res.x)
-
-
-
 
 
 # Generation of a validation orbit
 gen_valid_orbit = False
 
 if gen_valid_orbit :
-    x0 = xt_truth[0]
+    n_snapshots=50
+    x0 = np.zeros((n_snapshots, 6))
+    index_valid = np.random.randint(0, xt_truth.shape[0]-1, n_snapshots)
+    x0[...,:3] = xt_truth[index_valid]
+    x0[...,3:] = np.repeat([10.,28.,8/3], n_snapshots).reshape(3,-1).T
+    if exp=='1d' :
+        x0 = np.delete(x0, [3,4], axis=-1)
     # Generation of a (long) validation orbit 
     print(' > Generating a validation orbit...')
-    val_orb = generate_data(nn_L63, x0, thetas=res.x, n_steps=60000, dt=dt,
-            compute_y=False, sigmai=10., rhoi=28.)
+    val_orb = generate_data(nn_L63, x0, n_steps=20000, dt=dt,
+            compute_y=False)
     xt_valid = val_orb['x']
-    np.savez_compressed('dataset/validation_orbit_kriging-'+learning_sample+'.npz', 
-            xt_valid)
+    np.savez_compressed('dataset/saved_xt/validation_orbit_'+tag+extra_tag+'.npz', xt_valid)
 
 print(' > Done.')
 exit()
