@@ -20,6 +20,7 @@ from L63_mix import Lorenz63
 from ML_model_param import ML_model, train_ML_model
 from data import generate_data, generate_LHS, generate_data_solvers, generate_x0 
 from metrics import *
+import GPy
 
 import tensorflow as tf
 gpus = tf.config.experimental.list_physical_devices('GPU')
@@ -36,6 +37,7 @@ parser.add_argument('-a', '--learning_sample', default=2,
         help='Learning sample selection : orbit (=2) or lhs (=1).')
 parser.add_argument('-et', '--extra_tag', type=str, default='', 
         help='Adds an extra tag. Useful to save new datasets.')
+parser.add_argument('-gp', '--new_gp', default=False, action='store_true')
 
 args    = parser.parse_args()
 
@@ -48,6 +50,8 @@ extra_tag = args.extra_tag
 
 if tag=='-a1' : learning_sample = 'LHS'
 else : learning_sample = 'orbits'
+
+new_gp = args.new_gp
 
 """
 if tag_m=='-m1' : metric = 'mean+std'
@@ -172,60 +176,117 @@ def callbackF(x_) :
         print("theta value : ", x_)
     n_iter += 1
 
-
-mesh_len, n_ic = 10, 50
-
-sigmas = np.linspace(7., 13., mesh_len)
-rhos = np.linspace(26.5, 32., mesh_len)
-betas = np.linspace(1.5, 3.2, mesh_len)
-
-sigmas_rhos = np.array(np.meshgrid(sigmas, rhos)).T.reshape(-1,2)
-sigmas_betas = np.array(np.meshgrid(sigmas, betas)).T.reshape(-1,2)
-rhos_betas = np.array(np.meshgrid(rhos, betas)).T.reshape(-1,2)
-
-sigmas_rhos = np.swapaxes(np.dstack([sigmas_rhos]*n_ic),1,2).reshape(-1,2)
-sigmas_betas = np.swapaxes(np.dstack([sigmas_betas]*n_ic),1,2).reshape(-1,2)
-rhos_betas = np.swapaxes(np.dstack([rhos_betas]*n_ic),1,2).reshape(-1,2)
-
-
-variables_list = [sigmas_rhos, sigmas_betas, rhos_betas]
-fixed_params_list = [8/3, 28., 10.]
-var_indexes = [[0,1], [0,2], [1,2]]
-sdir = 'dataset/090621/'
-try : 
-    os.mkdir(sdir)
-    print(' > Created folder %s.'%sdir)
+n_snapshots, n_thetas = 50, 150
+n_steps = 20000
+sdir = 'dataset/070621/'
+try : os.mkdir(sdir)
 except : pass
 
-snames = ['fixed_betas', 'fixed_rhos', 'fixed_sigmas']
-index_valid = np.random.randint(0, xt_truth.shape[0]-1, n_ic)
-x0 = xt_truth[index_valid]
+if new_gp :
+    print(' > Computing new learning sample for kriging.')
+    index_valid = np.random.randint(0, xt_truth.shape[0]-1, n_snapshots)
+    x0 = xt_truth[index_valid]
 
-n_steps_valOrb = 20000
-indexes = [0,1,2]
+    min_bounds_Th, max_bounds_Th = np.array([10.,26.5,1.5]), np.array([10.,32.,3.2])
+    thetas_list = lhs(3, samples=n_thetas)*(max_bounds_Th-min_bounds_Th)+min_bounds_Th
+    Thetas = np.repeat(thetas_list, n_snapshots).reshape(3,-1).T
 
-for i in range(3) :
-    excluded_var_index = [x for x in indexes if x not in var_indexes[i]]    
-    
-    Thetas, Errors = np.zeros((mesh_len**2*n_ic, 3))*np.nan, np.zeros(mesh_len**2*n_ic)*np.nan
-    Thetas[:,var_indexes[i]] = variables_list[i]
-    Thetas[:,excluded_var_index[0]] = np.repeat(fixed_params_list[i], mesh_len**2*n_ic)
-    
-    #X0 = np.repeat(x0, mesh_len**2).reshape(3,-1).T
-    X0 = np.array([x0 for i in range(mesh_len**2)]).reshape(-1,3)
+    X0 = np.array([x0 for i in range(n_thetas)]).reshape(-1,3)
 
-    ic = np.zeros((mesh_len**2*n_ic, 6))
+    ic = np.zeros((n_thetas*n_snapshots,6))
     ic[:,:3], ic[:,3:] = X0, Thetas
 
     print(' > Computing output')
-
-    output = generate_data(nn_L63, ic, n_steps=n_steps_valOrb, dt=0.05, compute_y=False)
+    
+    L63 = Lorenz63()
+    output = generate_data(L63, ic, n_steps=n_steps, dt=0.05, compute_y=False)
     xt_pred = output['x']
-    
-    np.savez_compressed(sdir+snames[i]+'-fhat-x0-090621.npz', ic)
-    np.savez_compressed(sdir+snames[i]+'-fhat-pred-090621.npz', xt_pred)
-    
-    print(' > Successfully saved, %i/3.'%(i+1))
+    np.savez_compressed(sdir+'raw_xt-obs.npz', xt_pred)
 
+    xt_pred = np.array([[x[i*n_snapshots:(i+1)*n_snapshots] for i in range(n_thetas)] \
+        for x in xt_pred])
+
+
+    # Computing errors
+    # Computing predicted orbits standard deviation
+    mean_pred = np.mean(xt_pred, axis=(0))[:,:,:3]
+    mean_pred = np.mean(mean_pred, axis=1)
+
+    std_pred = np.std(xt_pred, axis=0)[:,:,:3]
+    std_pred = np.mean(std_pred, axis=1)
+
+    # Computing truth standard deviation
+    mean_truth = np.mean(xt_truth, axis=0)
+    std_truth = np.std(xt_truth, axis=0)
+
+    # Computing error (MSE) on STDs
+    err_mean = np.mean((mean_pred-mean_truth)**2, axis=1)
+    err_std = np.mean((std_pred-std_truth)**2, axis=1)
+
+    saving_gp = True  
+    extra_tag = extra_tag
+    if saving_gp :
+        print(' > Saving GP learning sample (STD).')
+        np.savez_compressed(sdir+'train_orbits_gp'+tag+extra_tag+'.npz',
+                xt_pred)
+        np.savez_compressed(sdir+'train_thetas_gp'+tag+extra_tag+'.npz', 
+                thetas_list)
+        np.savez_compressed(sdir+'train_errors_std_gp'+tag+extra_tag+'.npz',
+                err_std)
+        np.savez_compressed(sdir+'train_errors_mean_gp'+tag+extra_tag+'.npz', 
+                err_mean)
+
+else :
+    print(' > Loading learning sample for kriging.')
+    err_std = np.load(sdir+'train_errors_std_gp'+tag+extra_tag+'.npz')['arr_0']
+    err_mean = np.load(sdir+'train_errors_mean_gp'+tag+extra_tag+'.npz')['arr_0']
+    thetas_list = np.load(sdir+'train_thetas_gp'+tag+extra_tag+'.npz')['arr_0']
+
+
+## Calibration
+err_type='mean+std'
+if err_type=='std' :
+    y = np.copy(err_std)
+else :
+    y = err_std+err_mean
+thetas_list = thetas_list
+print(thetas_list.shape)
+mean_thetas, std_thetas = np.mean(thetas_list, axis=0), np.std(thetas_list, axis=0)
+mean_y, std_y = np.mean(err_std, axis=0), np.std(err_std, axis=0)
+
+norm_gp = True
+if norm_gp :
+    thetas_list = (thetas_list-mean_thetas)/std_thetas
+    y = (y-mean_y)/std_y
+
+y = err_std.reshape(-1,1)
+
+thetas_list = thetas_list.reshape(-1,3)
+kernel = GPy.kern.Matern52(input_dim=3, ARD=True)
+gp = GPy.models.GPRegression(thetas_list, y, kernel)
+gp.optimize(messages=True)
+print(gp)
+print(gp.kern.lengthscale)
+
+print('\n -------  Optimization  -------')
+
+norms_gp = np.array([mean_thetas, mean_y, std_thetas, std_y])
+
+loss_kriging = compute_loss_kriging(gp, norm_gp=norm_gp, norms=norms_gp)
+    
+theta_to_update = [9.5, 28.5, 2.5]
+print(' > initial theta value : ', theta_to_update)
+
+eps, tol = 1e-1, 1e-2
+
+res = minimize(loss_kriging, theta_to_update, method='BFGS', tol=tol, 
+        callback=callbackF, options={'eps':eps})
+    
+theta_star = res.x
+
+print(' > optimal theta value : ', theta_star)
+
+
+### END OF SCRIPT ###
 print(' > Done.')
 exit()

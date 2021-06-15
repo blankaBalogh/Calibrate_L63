@@ -53,7 +53,7 @@ class Lorenz63():
 
             # Lorenz'63 model
             if mode == 'lorenz':
-                dz[..., 0]  = sigma * (z_2 - z_1)
+                dz[..., 0]  = sigma * (z_2 - z_1) 
                 dz[..., 1]  = rho * z_1 - z_2 - z_1 * z_3
                 dz[..., 2]  = z_1 * z_2 - beta * z_3
 
@@ -64,7 +64,7 @@ class Lorenz63():
                 dz = (nn_model.predict([zn, beta_arr]))*std_y+mean_y
 
             elif mode == 'hybrid':
-                dz[..., 0]  = sigma * (z_2 - z_1)
+                dz[..., 0]  = sigma * (z_2 - z_1) 
                 dz[..., 1]  = rho * z_1 - z_2 - z_1 * z_3
                 zn = (z[0]-mean_x)/std_x
                 zn = zn.reshape(1,3)

@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 # -- Parsing aruments
 from argparse import ArgumentParser
 parser = ArgumentParser()
-parser.add_argument('-a', '--learning_sample', type=int, default=2,
+parser.add_argument('-a', '--learning_sample', default=2,
         help='Learning sample selection : orbit (=2) or lhs (=1).')
 parser.add_argument('-et', '--extra_tag', type=str, default='', 
         help='Adds an extra tag. Useful to save new datasets.')
@@ -83,6 +83,12 @@ if tag=='-a1' :
         y_data = y_data.reshape(-1,1)
     print("Size of learning sample : ", x_data.shape)
 
+if tag=='-amix' :
+    print(' > Loading mixed orbit & LHS learning sample.')
+    x_data = np.load('dataset/x_data-amix'+extra_tag+'.npz')['arr_0']
+    y_data = np.load('dataset/y_data-amix'+extra_tag+'.npz')['arr_0'][...,:3]
+
+
 
 # --- Learning fhat_betas
 print('\n ------ Learning fhat_thetas ------- ')
@@ -93,6 +99,7 @@ x_data = (x_data-mean_x)/std_x
 y_data = (y_data-mean_y)/std_y
 
 # Setting up NN model
+#layers = [256, 256, 256, 256, 128, 64, 32, 16]
 layers = [256, 128, 64, 32, 16]
 
 n_epochs = 50

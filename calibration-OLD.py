@@ -40,8 +40,6 @@ parser.add_argument('-o', '--optimisation', type=int, default=1,
         help='Optimization selection : kriging (=1) or raw (=2).')
 parser.add_argument('-gp', '--new_gp_ls', default=False, 
         action='store_true', help='New GP LS or not ?')
-parser.add_argument('-STD', '--gp_STD', default=False,
-        action='store_true', help='New STD LS or not ?')
 parser.add_argument('-et', '--extra_tag', type=str, default='', 
         help='Adds an extra tag. Useful to save new datasets.')
 parser.add_argument('-exp', '--experience', type=str, default='3d', 
@@ -58,7 +56,6 @@ if exp=='1d' :
     extra_tag=extra_tag+'-1d'
 
 new_gp_ls = args.new_gp_ls
-std_learning_sample = args.gp_STD
 
 if tag=='-a1' : learning_sample = 'LHS'
 else : learning_sample = 'orbits'
@@ -68,8 +65,6 @@ else : metric = 'std'
 
 if tag_o=='-o1' : optim = 'kriging'
 else : optim = 'raw'
-
-tag_m = '-m2'
 
 print()
 print('> Learning sample : %s.'%learning_sample)
@@ -149,7 +144,7 @@ if tag_m == '-m2' :
 else :
     alpha=0.5
 
-n_steps_loss, n_snapshots = 20000, 50
+n_steps_loss, n_snapshots = 200, 50
 
 x0 = np.zeros((n_snapshots, 6))
 index_valid = np.random.randint(0, xt_truth.shape[0]-1, n_snapshots)
@@ -159,9 +154,6 @@ dt = 0.05
 
 comp_loss_data = compute_loss_data(nn_L63, xt_truth, x0=x0, n_steps=n_steps_loss, 
         dt=0.05, alpha=alpha, tag=tag, extra_tag=extra_tag)
-comp_std_data = compute_std_data(nn_L63, xt_truth, x0=x0, n_steps=n_steps_loss, dt=0.05, 
-        tag=tag, extra_tag=extra_tag)
-
 n_iter = 0
 
 def callbackF(x_) :
@@ -177,88 +169,68 @@ def callbackF(x_) :
 
 if tag_o=='-o1' :
     print('\n ------- Defining and fitting GP regressor ------- ')
+    from sklearn.gaussian_process import GaussianProcessRegressor
+    from sklearn.gaussian_process.kernels import Matern
 
     if exp=='1d' :
         n_samples = 50
         sigma, rho = 10., 28.
         min_bounds, max_bounds = np.array([sigma, rho, 2.]), np.array([sigma, rho, 3.])
     else :
-        n_samples = 100
-        min_bounds, max_bounds = np.array([9.,27.3,2.]), np.array([11., 29., 3.])
+        n_samples = 150
+        min_bounds, max_bounds = np.array([9.,26.5,2.]), np.array([11., 29., 3.])
 
     thetas_list = lhs(3, samples=n_samples)*(max_bounds-min_bounds)+min_bounds
-    #thetas_list = np.array([[10.33333333, 28., 2.55555556],[9.5, 28., 2.7]])
     saving_gp = True
 
     if new_gp_ls :
-        if std_learning_sample :
-            stds = np.zeros((n_samples, 3)) * np.nan
+        errors = np.zeros((n_samples, 1)) * np.nan
 
-            for (i, theta) in enumerate(thetas_list) :
-                print(' > std no.%d/%d' % ((i+1), n_samples))
-                stds[i] = comp_std_data(theta, i=i)
-                print('   ', stds[i])
-            
-            if saving_gp :
-                print(' > Saving GP learning sample (STD).')
-                np.savez_compressed('dataset/stds/train_thetas_gp'+tag+extra_tag+'.npz',
-                        thetas_list)
-                np.savez_compressed('dataset/stds/train_stds_gp'+tag+extra_tag+'.npz',
-                        stds)
+        for (i,theta) in enumerate(thetas_list) :
+            print(' > err. no.%d/%d.' % ((i+1), n_samples))
+            errors[i,0] = comp_loss_data(theta, i=i)
 
-            y = stds
-            
-        else :
-            errors = np.zeros((n_samples, 1)) * np.nan
-
-            for (i,theta) in enumerate(thetas_list) :
-                print(' > err. no.%d/%d.' % ((i+1), n_samples))
-                errors[i,0] = comp_loss_data(theta, i=i)
-
-            if saving_gp :
-                print(' > Saving GP learning sample (errors).')
-                np.savez_compressed('dataset/250521/train_thetas_gp'+tag+tag_m+ \
-                        extra_tag+'.npz', thetas_list)
-                np.savez_compressed('dataset/250521/train_errors_gp'+tag+tag_m+ \
-                        extra_tag+'.npz', errors)
-
-            y = errors
+        if saving_gp :
+            print(' > Saving GP learning sample.')
+            np.savez_compressed('dataset/thetas_errors/train_thetas_gp'+tag+tag_m+ \
+                    extra_tag+'-NEW.npz', thetas_list)
+            np.savez_compressed('dataset/thetas_errors/train_errors_gp'+tag+tag_m+ \
+                    extra_tag+'-NEW.npz', errors)
 
     else :
-        if std_learning_sample :
-            thetas_list = np.load('dataset/stds/train_thetas_gp'+tag+extra_tag+'.npz')['arr_0']
-            y = np.load('dataset/stds/train_errors_gp'+tag+extra_tag+'.npz')['arr_0']
-        
-        else :
-            thetas_list = np.load('dataset/thetas_errors/train_thetas_gp'+tag+tag_m+\
-                    extra_tag+'.npz')['arr_0']
-            y = np.load('dataset/thetas_errors/train_errors_gp'+tag+tag_m+ \
-                    extra_tag+'.npz')['arr_0']
+        thetas_list = np.load('dataset/thetas_errors/train_thetas_gp'+tag+tag_m+\
+                extra_tag+'.npz')['arr_0']
+        errors = np.load('dataset/thetas_errors/train_errors_gp'+tag+tag_m+ \
+                extra_tag+'.npz')['arr_0']
 
     # fitting GP
     mean_thetas, std_thetas = np.mean(thetas_list, axis=0), np.std(thetas_list, axis=0)
-    mean_y, std_y = np.mean(y, axis=0), np.std(y, axis=0)
+    mean_errors, std_errors = np.mean(errors, axis=0), np.std(errors, axis=0)
 
     norm_gp = True
     if norm_gp :
         thetas_list = (thetas_list-mean_thetas)/std_thetas
-        y = (y-mean_y)/std_y
+        errors = (errors-mean_errors)/std_errors
+    '''
+    kernel = Matern(length_scale=1., nu=1.)       # Definition of Matern kernel
+    gp = GaussianProcessRegressor(kernel=kernel, random_state=42)
+    thetas_list = thetas_list.reshape(-1,3)
+    if exp=='1d' :
+        thetas_list : thetas_list[...,-1].reshape(-1,1)
 
-    
-    kernel = GPy.kern.Matern52(input_dim=3, ARD=True)
-    gp = GPy.models.GPRegression(thetas_list, y, kernel)
+    gp.fit(thetas_list, errors)
+    '''
+
+    kernel = GPy.kern.Matern52(in_dim=3, ARD=True)
+    gp = GPy.models.GPRegression(thetas_list, errors, kernel)
     gp.optimize(messages=True)
     print(gp)
     print(gp.kern.lengthscale)
 
     print('\n -------  Optimization  -------')
 
-    norms_gp = [mean_thetas, mean_y, std_thetas, std_y]
-
-    if std_learning_sample :
-        loss_kriging = compute_STDloss_kriging(gp, nom_gp=norm_gp, norms=norms_gp)
-    else :
-        loss_kriging = compute_loss_kriging(gp, norm_gp=norm_gp, norms=norms_gp)
+    norms_gp = [mean_thetas, mean_errors, std_thetas, std_errors]
+    loss_kriging = compute_loss_kriging(gp, norm_gp=norm_gp, norms=norms_gp)
     
     if exp=='1d' : 
         theta_to_update = 2.

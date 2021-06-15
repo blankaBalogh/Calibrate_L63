@@ -1,6 +1,7 @@
 import numpy as np
 from data import *
 
+
 # Distances
 def dist_L1() :
     '''
@@ -32,7 +33,7 @@ def dist_L2() :
 # Loss functions
 # Validation orbit generated + loss computed over it
 def compute_loss_data(nn_L63, xt_truth, x0=[0.,0.,1.,10.,28.,8/3], 
-        n_steps=200, dt=0.05, alpha=1., tag='', extra_tag='') :
+        n_steps=20000, dt=0.05, alpha=1., tag='', extra_tag='') :
     '''
     Loss function.
     '''
@@ -46,12 +47,16 @@ def compute_loss_data(nn_L63, xt_truth, x0=[0.,0.,1.,10.,28.,8/3],
     def loss_fun(theta_to_update, i=0) :
         '''
         '''
-        n_features = len(theta_to_update)
-        thetas = np.repeat(theta_to_update, n_snapshots).reshape(n_features, n_snapshots).T
+        thetas = np.repeat(theta_to_update, n_snapshots).reshape(3, n_snapshots).T
         x0[...,3:] = thetas
-        output = generate_data(nn_L63, x0, n_steps=20000, dt=dt, compute_y=False)
+        output = generate_data(nn_L63, x0, n_steps=n_steps, dt=dt, compute_y=False)
         xt_pred = output['x']
-        
+
+        save_ds=False
+        if save_ds :
+            np.savez_compressed('dataset/saved_xt/saved_orbits/xt_pred_'+\
+                    str(i)+'-numpy.npz', xt_pred)
+
         mean_hat_x = np.mean(xt_pred[...,:3], axis=(0,1))
         mean_truth_x = np.mean(xt_truth, axis=(0))
 
@@ -69,8 +74,72 @@ def compute_loss_data(nn_L63, xt_truth, x0=[0.,0.,1.,10.,28.,8/3],
 
 
 
+
+# Validation orbit generated + STD computed over it
+def compute_std_data(nn_L63, xt_truth, x0=[0.,0.,1.,10.,28.,8/3], 
+        n_steps=20000, dt=0.05, tag='', extra_tag='') :
+    '''
+    Loss function.
+    '''
+    n_snapshots = len(x0)
+    distance = dist_L2()
+    
+    def loss_fun(theta_to_update, i=0) :
+        '''
+        '''
+        thetas = np.repeat(theta_to_update, n_snapshots).reshape(3, n_snapshots).T
+        x0[...,3:] = thetas
+        output = generate_data(nn_L63, x0, n_steps=n_steps, dt=dt, compute_y=False)
+        xt_pred = output['x']
+
+        save_ds=True
+        if save_ds :
+            np.savez_compressed('dataset/stds/saved_orbits/xt_pred_'+\
+                    str(i)+'-numpy.npz', xt_pred)
+
+        std_hat_x = np.std(xt_pred[...,:3], axis=(0,1))
+        print('STD : ', std_hat_x)
+    #print('Optimal beta : ', beta_to_update)
+        return std_hat_x
+
+    return loss_fun
+
+
+
+
+
+
 # Loss function for kriging
 def compute_loss_kriging(gp, norm_gp=False, norms=None) :
+    '''
+    Loss function to optimize beta value after kriging. 
+    '''
+    
+    def loss_fun(th) :
+        '''
+        '''
+        #theta_to_update = np.zeros(3)
+        #theta_to_update[0], theta_to_update[1] = 10., 28.
+        #theta_to_update[2] = th
+        #theta_ = np.copy(theta_to_update) 
+        theta_ = np.array([th])
+        print('Optimal theta value : ', theta_)
+        
+        if norm_gp :
+            theta_ = (theta_-norms[0])/norms[2]
+
+        err = gp.predict(theta_)[0]
+
+        if norm_gp :
+            err = norms[3]*err + norms[1]
+
+        return err[0,0]
+
+    return loss_fun
+
+
+# Loss function for kriging
+def compute_STDloss_kriging(gp, std_truth, norm_gp=False, norms=None) :
     '''
     Loss function to optimize beta value after kriging. 
     '''
@@ -83,15 +152,29 @@ def compute_loss_kriging(gp, norm_gp=False, norms=None) :
         
         if norm_gp :
             theta_ = (theta_-norms[0])/norms[2]
-
-        err = gp.predict(theta_)
-
+    
+        std_pred = gp.predict(theta_)[0][0]
+        
         if norm_gp :
-            err = norms[3]*err + norms[1]
+            std_pred = norms[3]*std_pred + norms[1]
 
-        return err[0,0]
+        err = np.mean((std_pred-std_truth)**2)
+
+        return err
 
     return loss_fun
+
+
+
+# Computing m metric
+def eval_metric(thetas, m, std_truth) :
+    '''
+    '''
+    
+    m = np.mean((m.predict(thetas)[0]-std_truth)**2, axis=1)
+
+    return m
+
 
 
 """

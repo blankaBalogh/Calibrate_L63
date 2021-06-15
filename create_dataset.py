@@ -24,7 +24,7 @@ if __name__ == '__main__':
 
     parser = ArgumentParser()
     parser.add_argument('-exp', '--experience', type=str, default='3d', 
-            help="exp. type : 'std', '1d' or '3d'.")
+            help="exp. type : 'std', '1d', '3d'.")
     parser.add_argument('-a', '--learning_sample', type=int, default=1, 
             help='Type of learning sample.')
     parser.add_argument('-n_ic', '--N_ic', type=int, default=1, 
@@ -45,8 +45,8 @@ if __name__ == '__main__':
     N_ts = args.N_ts  # MTUs (with 100 MTUs = 1 year)
     N_ic = args.N_ic  # Number of 'initial conditions + parameters' to sample
    
-    min_bounds = np.array([-35., -35., 0.,  9., 26.5, 1.5])
-    max_bounds = np.array([ 35.,  35., 70., 11., 29.5, 3.0])
+    min_bounds = np.array([-35., -35., 0.,  7., 26.5, 1.5])
+    max_bounds = np.array([ 35.,  35., 60., 13., 32., 3.2])
     
     if exp == 'std':
         min_bounds[3:6] = np.array([truth_sigma, truth_rho, truth_beta])
@@ -56,6 +56,9 @@ if __name__ == '__main__':
         extra_tag = extra_tag+'-1d'
         min_bounds[3:5] = np.array([truth_sigma, truth_rho])
         max_bounds[3:5] = np.array([truth_sigma, truth_rho])
+
+    if exp=='mix' : 
+        tag = '-a2'
         
     dt = 0.05
     if tag=='-a2' :
@@ -65,6 +68,14 @@ if __name__ == '__main__':
         N_steps = 1
         
     x_data, y_data = create_dataset(min_bounds, max_bounds, N_ic=N_ic, N_steps=N_steps, dt=dt)
+
+    if exp=='mix' :
+        x_data_lhs, y_data_lhs = create_dataset(min_bounds, max_bounds, N_ic=N_ic*N_steps, 
+                N_steps=1, dt=dt)
+
+        x_data = np.concatenate((x_data, x_data_lhs), axis=0)
+        y_data = np.concatenate((y_data, y_data_lhs), axis=0)
+        tag='-mix'
 
     root = 'dataset/'
     fname = root+'x_data'+tag+extra_tag+'.npz'
