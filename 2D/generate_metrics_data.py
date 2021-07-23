@@ -14,11 +14,18 @@ import seaborn as sns
 sns.set_style('white')
 from scipy.optimize import minimize
 from pyDOE import lhs
+from datetime import datetime
 
 #from eL63 import embeddedLorenz63
 from L63_mix import Lorenz63
+from ML_model_param import ML_model, train_ML_model
 from data import generate_data, generate_LHS, generate_data_solvers, generate_x0 
 from metrics import *
+
+import tensorflow as tf
+gpus = tf.config.experimental.list_physical_devices('GPU')
+for gpu in gpus :
+    tf.config.experimental.set_memory_growth(gpu, True)
 
 import matplotlib.pyplot as plt
 
@@ -57,8 +64,7 @@ print('> Learning sample : %s.'%learning_sample)
 #print('> Metric : %s.'%metric)
 #print('> Optimizer : %s.'%optim)
 #if new_gp_ls :
-#    print('> New GP learning sample.')xt_fixed_betas = np.load(fdir+'090621/fixed_'+param+'-fhat-pred-090621.npz')['arr_0']
-
+#    print('> New GP learning sample.')
 
 
 # -------------------------------------------------------------------------------- #
@@ -77,19 +83,69 @@ yt_truth = np.load('dataset/yt_truth.npz')['arr_0']
 print('***** 2nd experiment : learning to predict full y_data. ***** ')
 print(' ------- Loading learning samples ------- ')
 
-n_steps_loss, n_snapshots = 200, 50
-
-x0 = np.zeros((n_snapshots, 6))
-index_valid = np.random.randint(0, xt_truth.shape[0]-1, n_snapshots)
-x0[...,:3] = xt_truth[index_valid]
-#x0[...,3:] = np.repeat([10.,28.,8/3], 50).reshape(3, n_snapshots).T
-
+"""
 dt = 0.05
+N_ic =  100             # Number of initial conditions to sample
+N_ts = 100              # 200 ts with dt=0.05 is the equivalent of 1 year of data 
+N_steps = int(N_ts/dt)  # Number of timesteps in the orbit
+truth_sigma, truth_rho = 10., 28.
+"""
 
-"""
-comp_loss_data = compute_loss_data(nn_L63, xt_truth, x0=x0, n_steps=n_steps_loss, 
-        dt=0.05, alpha=alpha, tag=tag, extra_tag=extra_tag)
-"""
+# Loading 'orbits' learning sample
+if tag=='-a2' :
+    print(' > Loading learning sample of orbits.')
+    x_data = np.load('dataset/x_data-a2'+extra_tag+'.npz')['arr_0']
+    y_data = np.load('dataset/y_data-a2'+extra_tag+'.npz')['arr_0'][...,:3]
+    x_data, y_data = np.swapaxes(x_data,0,1), np.swapaxes(y_data,0,1) 
+    x_data = x_data.reshape(-1, x_data.shape[-1])
+    y_data = y_data.reshape(-1, y_data.shape[-1])
+
+# Loading lhs learning sample
+if tag=='-a1' :
+    print(' > Loading learning sample of LHS sample.')
+    x_data = np.load('dataset/x_data-a1'+extra_tag+'.npz')['arr_0'][0]
+    y_data = np.load('dataset/y_data-a1'+extra_tag+'.npz')['arr_0'][0][...,:3]
+    x_data = np.delete(x_data, 3, axis=-1)
+
+if tag=='-amix' :
+    print(' > Loading mixed learning sample.')
+    x_data = np.load('dataset/x_data-amix'+extra_tag+'.npz')['arr_0']
+    y_data = np.load('dataset/y_data-amix'+extra_tag+'.npz')['arr_0'][...,:3]
+
+
+# --- Learning fhat_betas
+print('\n ------ Learning fhat_thetas ------- ')
+# Normalization of x & y data
+mean_x, std_x = np.mean(x_data, axis=0), np.std(x_data, axis=0)
+mean_y, std_y = np.mean(y_data, axis=0), np.std(y_data, axis=0)
+x_data = (x_data-mean_x)/std_x
+y_data = (y_data-mean_y)/std_y
+
+# Setting up NN model
+#layers = [1024, 512, 256, 128, 64, 32, 16]
+#layers = [64, 32, 16]
+#layers = [256, 128, 64, 32, 16]
+#layers = [256, 256, 256, 128, 64, 32, 16]
+layers = [1024, 512, 256, 128, 64, 32, 16]
+
+
+print('y data shape : ', y_data.shape)
+
+dic_NN = {'name':'f_orb', 'in_dim':x_data.shape[1], 'out_dim':y_data.shape[1], 
+        'nlays':layers}
+nn_L63 = ML_model(dic_NN)
+nn_L63.norms = [mean_x, mean_y, std_x, std_y]
+#extra_tag = extra_tag+'-largerNN'
+extra_tag = extra_tag+'-7dl'
+nn_L63.suffix = tag+extra_tag
+nn_L63.name = 'model_'+tag+extra_tag
+print('> Model to load : %s.'%nn_L63.name)
+print(nn_L63.model.summary())
+
+print(' > Loading model weights.')
+nn_L63.model.load_weights('weights/best-weights'+nn_L63.suffix+'.h5')
+
+
 n_iter = 0
 
 def callbackF(x_) :
@@ -103,7 +159,22 @@ def callbackF(x_) :
     n_iter += 1
 
 
-mesh_len, n_ic = 10, 50
+def remove_fp(xt, last_ind=1000) :
+    '''
+    Replaces fixed point orbits by NaNs. 
+    '''
+    std_x = np.std(xt[-last_ind:], axis=0)[...,:3]
+    std_x = np.sum(std_x, axis=-1)
+    fp_indexes = np.where(std_x < 1.)
+    fp_theta, fp_orb = fp_indexes[0], fp_indexes[1]
+    fill_nans = np.zeros((xt.shape[0], xt.shape[-1]))*np.nan
+    if len(fp_theta>0) :
+        for i in range(len(fp_theta)) :
+            xt[:,fp_theta[i],fp_orb[i]] = fill_nans
+    return xt 
+
+
+mesh_len, n_ic = 20, 25
 
 rhos = np.linspace(26.5, 32., mesh_len)
 betas = np.linspace(1.5, 3.2, mesh_len)
@@ -111,33 +182,44 @@ betas = np.linspace(1.5, 3.2, mesh_len)
 rhos_betas = np.array(np.meshgrid(rhos, betas)).T.reshape(-1,2)
 rhos_betas = np.swapaxes(np.dstack([rhos_betas]*n_ic),1,2).reshape(-1,2)
 
-sdir = 'dataset/'
+sdir = 'dataset/'+datetime.today().strftime('%d%m%Y')+'/'
 try : 
     os.mkdir(sdir)
     print(' > Created folder %s.'%sdir)
 except : pass
 
-index_valid = np.random.randint(0, xt_truth.shape[0]-1, n_ic)
-x0 = xt_truth[index_valid]
+#index_valid = np.random.randint(0, xt_truth.shape[0]-1, n_ic)
+#x0 = xt_truth[index_valid]
 
-n_steps_valOrb = 20000
-   
-Thetas, Errors = np.zeros((mesh_len**2*n_ic, 3))*np.nan, np.zeros(mesh_len**2*n_ic)*np.nan
-Thetas[:,[1,2]] = rhos_betas
-Thetas[:,0] = np.repeat(10., mesh_len**2*n_ic)
-    
+# New x0 obtained by LHS sampling
+min_bounds, max_bounds = np.array([-25.,-25.,0.]), np.array([25.,25.,50.])
+delta_bounds = max_bounds-min_bounds
+x0 = lhs(3, samples=n_ic)*delta_bounds + min_bounds
+
+spinup = 300
+n_steps_valOrb = 20000 + spinup
+
+Thetas, Errors = rhos_betas, np.zeros(mesh_len**2*n_ic)*np.nan
 X0 = np.array([x0 for i in range(mesh_len**2)]).reshape(-1,3)
-
-ic = np.zeros((mesh_len**2*n_ic, 6))
+ic = np.zeros((mesh_len**2*n_ic, 5))
 ic[:,:3], ic[:,3:] = X0, Thetas
 
 print(' > Computing output')
-    
-L63 = Lorenz63()
-output = generate_data(L63, ic, n_steps=n_steps_valOrb, dt=0.05, compute_y=False)
+
+output = generate_data(nn_L63, x0=ic, n_steps=n_steps_valOrb, dt=0.05, compute_y=False)
 xt_pred = output['x']
+if n_ic == 1 :
+    xt_pred = xt_pred[:,0]
+
+# Removing spinup
+xt_pred = xt_pred[spinup:]
+
+
+xt_pred = np.array([xt_pred[:,n_ic*i:n_ic*(i+1)] for i in range(mesh_len**2)])
+xt_pred = np.swapaxes(xt_pred,0,1)
+print(' > pred shape : ', xt_pred.shape)
     
-np.savez_compressed(sdir+'fixed_sigmas-fhat-pred-070721.npz', xt_pred)
+np.savez_compressed(sdir+'fixed_sigmas-fhat-pred'+extra_tag+'.npz', xt_pred)
 
 print(' > Done.')
 exit()

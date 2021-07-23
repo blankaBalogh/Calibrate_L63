@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pandas as pd
 from pyDOE import lhs
@@ -39,16 +40,17 @@ if __name__ == '__main__':
     
     truth_sigma, truth_rho, truth_beta = 10., 28., 8/3
     
-    exp = args.experience #'std' or '1d'
-    extra_tag = args.extra_tag
-    tag = '-a'+str(args.learning_sample)
-    N_ts = args.N_ts  # MTUs (with 100 MTUs = 1 year)
-    N_ic = args.N_ic  # Number of 'initial conditions + parameters' to sample
-   
-    min_bounds = np.array([-35., -35., 0.,  7., 26.5, 1.5])
-    max_bounds = np.array([ 35.,  35., 60., 13., 32., 3.2])
+    exp         = args.experience   #'std' or '1d'
+    extra_tag   = args.extra_tag    # specific name of the learning sample
+    tag         = '-a'+str(args.learning_sample)    # kind of learning sample (LHS or orbit)
+    N_ts        = args.N_ts         # MTUs (with 100 MTUs = 1 year)
+    N_ic        = args.N_ic         # Number of 'initial conditions + parameters' to sample
+  
+    # Lorenz parameters' ranges
+    min_bounds = np.array([-35., -35., 0.,  10., 26., 1.5])
+    max_bounds = np.array([ 35.,  35., 60., 10., 32., 3.2])
 
-    
+    # Generating 'truth' dataset (i.e., theta=(10.,28.,8/3))
     if exp == 'std':
         n_ic = 1
         min_bounds[3:6] = np.array([truth_sigma, truth_rho, truth_beta])
@@ -59,37 +61,36 @@ if __name__ == '__main__':
         min_bounds[:3] = x0[:3]
         max_bounds[:3] = x0[:3]
 
+    # Generating learning sample with theta=(10.,28.,beta)
     if exp == '1d':
         extra_tag = extra_tag+'-1d'
         min_bounds[3:5] = np.array([truth_sigma, truth_rho])
         max_bounds[3:5] = np.array([truth_sigma, truth_rho])
-
+    
+    # Generating learning sample with theta=(10.,rho,beta)
     if exp == '2d' :
         extra_tag = extra_tag+'-2d'
         min_bounds[3] = truth_sigma
         max_bounds[3] = truth_sigma
 
-    if exp=='mix' : 
-        tag = '-a2'
-        
+    # Learning sample of orbits
     dt = 0.05
     if tag=='-a2' :
         N_steps = int(N_ts/dt)  # Number of timesteps in the orbit
 
+    # LHS learning sample
     else : 
         N_steps = 1
         
     x_data, y_data = create_dataset(min_bounds, max_bounds, N_ic=N_ic, N_steps=N_steps, dt=dt)
 
-    if exp=='mix' :
-        x_data_lhs, y_data_lhs = create_dataset(min_bounds, max_bounds, N_ic=N_ic*N_steps, 
-                N_steps=1, dt=dt)
-
-        x_data = np.concatenate((x_data, x_data_lhs), axis=0)
-        y_data = np.concatenate((y_data, y_data_lhs), axis=0)
-        tag='-mix'
 
     root = 'dataset/'
+    # checking whether root directory exists
+    try : os.mkdir(root)
+    except : pass
+
+    # Saving learning sample to root directory
     fname = root+'x_data'+tag+extra_tag+'.npz'
     np.savez_compressed(fname, x_data)
     np.savez_compressed(root+'y_data'+tag+extra_tag+'.npz', y_data)

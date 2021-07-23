@@ -1,12 +1,6 @@
-# Calibration tool for L63 model.
-
-# -------------------------------------------------------------------------------- #
-# -------------------------------    Importations   ------------------------------ #
-# -------------------------------------------------------------------------------- #
 import numpy as np
 from pyDOE import lhs
 
-#from eL63 import embeddedLorenz63
 from L63_mix import Lorenz63
 from ML_model_param import ML_model, train_ML_model
 from data import generate_data, generate_LHS, generate_data_solvers, generate_x0 
@@ -23,7 +17,7 @@ import matplotlib.pyplot as plt
 # -- Parsing aruments
 from argparse import ArgumentParser
 parser = ArgumentParser()
-parser.add_argument('-a', '--learning_sample', default=2,
+parser.add_argument('-a', '--learning_sample', default=1,
         help='Learning sample selection : orbit (=2) or lhs (=1).')
 parser.add_argument('-et', '--extra_tag', type=str, default='', 
         help='Adds an extra tag. Useful to save new datasets.')
@@ -88,21 +82,19 @@ if tag=='-a1' :
 # --- Learning fhat_betas
 print('\n ------ Learning fhat_thetas ------- ')
 # Normalization of x & y data
+print('x data : ', x_data[:10])
 mean_x, std_x = np.mean(x_data, axis=0), np.std(x_data, axis=0)
 mean_y, std_y = np.mean(y_data, axis=0), np.std(y_data, axis=0)
 x_data = (x_data-mean_x)/std_x
 y_data = (y_data-mean_y)/std_y
 
 # Setting up NN model
-#layers = [256, 256, 256, 256, 128, 64, 32, 16]
-layers = [256, 128, 64, 32, 16]
+layers = [1024, 512, 256, 128, 64, 32, 16]
 
-n_epochs = 20
-
-print('y data shape : ', y_data.shape)
+n_epochs = 50
 
 dic_NN = {'name':'f_orb', 'in_dim':x_data.shape[1], 'out_dim':y_data.shape[1], 
-        'nlays':layers}
+        'nlays':layers, 'dropout':False}
 nn_L63 = ML_model(dic_NN)
 nn_L63.norms = [mean_x, mean_y, std_x, std_y]
 nn_L63.suffix = tag+extra_tag
@@ -110,9 +102,10 @@ print(nn_L63.model.summary())
 
 print(' > Training NN model.')
 train_ML_model(x_data, y_data, nn_L63, batch_size=32, n_epochs=n_epochs, 
-        split_mode='beta', split_ratio=0.15)
+        split_mode='random', split_ratio=0.15)
 
 print(' > Loading model weights.')
-nn_L63.model.load_weights('weights/weights'+nn_L63.suffix+'.h5')
+nn_L63.model.load_weights('weights/best-weights'+nn_L63.suffix+'.h5')
 
-
+print(' > Done.')
+exit()
