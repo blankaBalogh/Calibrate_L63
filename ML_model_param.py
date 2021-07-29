@@ -26,14 +26,19 @@ class ML_model():
 
         self.name = ''
         
-        self.in_dim = 6
-        self.out_dim = 3
-        self.nlays = [64, 32, 16]
-        self.norms = None
-        self.set_params(dic)
-        self.suffix = ''
+        self.dropout    = False
+        self.in_dim     = 6
+        self.out_dim    = 3
+        self.nlays      = [64, 32, 16]
+        self.norms      = None
+        self.suffix     = ''
+        self.exp        = '2d'
+        self.model      = None
+        self.sigma      = 10.
+        self.rho        = 28.
+        self.beta       = 8/3
 
-        self.model = None        
+        self.set_params(dic)
         self.build_model()
 
 
@@ -56,7 +61,11 @@ class ML_model():
         else : 
             inp_ = inp1_
         
-        x = layers.Dense(self.nlays[0], activation=activation)(inp_)
+        if self.dropout==True :
+            x = layers.Dropout(0.2)(inp_)
+        else :
+            x = inp_
+        x = layers.Dense(self.nlays[0], activation=activation)(x)
         for k in range(1, len(self.nlays)):
             x = layers.Dense(self.nlays[k], activation=activation)(x)
             
@@ -101,12 +110,12 @@ class ML_model():
                     y__ = y_
 
 
-            elif self.out_dim == 1 : 
-                sigma, rho, beta = x[:,3], raw_x[:,4], raw_x[:,5]
+            elif self.out_dim == 1 :
+                sigma, rho = self.sigma, self.rho
 
                 y_ = np.zeros(x.shape)[...,:3]
-                y_[..., 0] = sigma * (x[:, 1] - x[:, 0])
-                y_[..., 1] = rho*x[:, 0] - x[:, 1] - x[:, 0]*x[:, 2]
+                y_[..., 0] = sigma * (raw_x[:, 1] - raw_x[:, 0])
+                y_[..., 1] = rho*raw_x[:, 0] - raw_x[:, 1] - raw_x[:, 0]*raw_x[:, 2]
                 
                 if self.norms is not None :
                     if not (self.in_dim-3) == 0 :
@@ -168,10 +177,33 @@ def train_ML_model(x_data, y_data, NN_model, batch_size=512, learning_rate=0.001
 
             th_train, th_test = th_data_[:,:-ind_last], th_data_[:,-ind_last:]
             th_train, th_test   = th_train.reshape(n_ic*n_trts,1), th_test.reshape(n_ic*n_tets,1)
+    elif split_mode=='random' :
+        from sklearn.model_selection import train_test_split
+        print(' > learning sample : random.')
+        nf_x, nf_y = x_data_.shape[1], y_data.shape[1]
+        print('   nf_x : ', nf_x)
+        train_data = np.concatenate((x_data_, y_data), axis=-1)
+        np.random.seed(42)
+        np.random.shuffle(train_data)
+        x_data, y_data = train_data[:,:nf_x], train_data[:,nf_x:]
+        print('   x_data shape : ', x_data.shape)
         
+        x_train, x_test, y_train, y_test = train_test_split(x_data, y_data, 
+                test_size=split_ratio, random_state=42)
+        x_train, th_train = x_train[:,:3], x_train[:,3:]
+        x_test, th_test = x_test[:,:3], x_test[:,3:]
+
     # -- Model checkpoint : saving best model weights wrt "monitor" score.
-    ckpt = ModelCheckpoint('weights/weights'+NN_model.suffix+'.h5', 
+    n_train = x_train.shape[0]
+    n_batch_per_epoch = int(n_train/batch_size)
+    n_save_epochs = 10
+    ckpt_10e = ModelCheckpoint('weights/weights'+NN_model.suffix+'-e{epoch:02d}.h5', 
+            monitor='val_r2_score_keras', save_weights_only=True, verbose=1, mode="max",
+            period=10)
+            #save_freq=(n_save_epochs*n_batch_per_epoch))
+    ckpt_best = ModelCheckpoint('weights/best-weights'+NN_model.suffix+'.h5', 
             monitor='val_r2_score_keras', save_best_only=True, verbose=1, mode="max")
+
 
     def scheduler(epoch, lr):
         if epoch < 15:
@@ -199,12 +231,13 @@ def train_ML_model(x_data, y_data, NN_model, batch_size=512, learning_rate=0.001
     if not (NN_model.in_dim-3) == 0 :
         inputs = [x_train, th_train]
         valid_data = ([x_test, th_test], y_test)
+
     history = NN_model.model.fit(inputs, y_train, epochs=n_epochs,
         batch_size=batch_size, verbose=0, validation_data=valid_data, 
-        callbacks=[ckpt, LearningRateScheduler(scheduler)])
+        callbacks=[ckpt_10e, ckpt_best, LearningRateScheduler(scheduler)])
     
     # -- Loading best ANN weights
-    NN_model.model.load_weights('weights/weights'+NN_model.suffix+'.h5')
+    NN_model.model.load_weights('weights/best-weights'+NN_model.suffix+'.h5')
     
     if return_datasets :
         if not (NN_model.in_dim-3)==0 :
