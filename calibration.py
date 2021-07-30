@@ -12,7 +12,8 @@ from L63_mix import Lorenz63
 from ML_model_param import ML_model, train_ML_model
 from data import generate_data, generate_LHS, generate_data_solvers, generate_x0 
 from metrics import *
-import GPy
+import gpflow
+from gpflow.utilities import print_summary
 
 # Sharing GPU resources (compat. TF>2.0)
 import tensorflow as tf
@@ -190,6 +191,7 @@ if new_gp :
 
     # Computing orbits
     if bias :
+        np.random.seed(42)
         bsigma  = np.random.random(1)*(11.-9.)+9.
         brho    = np.random.random(1)*(29.5-27.)+27.
         print('Biased LR parameters : sigma=%.3f, rho=%.3f.'%(bsigma, brho))
@@ -241,7 +243,7 @@ y = alpha*err_std + (1-alpha)*err_mean
 
 # normalizing kriging input/target data
 mean_thetas, std_thetas = np.mean(thetas_list, axis=0), np.std(thetas_list, axis=0)
-mean_y, std_y = np.mean(err_std, axis=0), np.std(err_std, axis=0)
+mean_y, std_y = np.mean(y, axis=0), np.std(y, axis=0)
 
 norm_gp = True
 if norm_gp :
@@ -251,13 +253,22 @@ if norm_gp :
 y = err_std.reshape(-1,1)
 
 # kriging
+
+k = gpflow.kernels.Matern52(variance=1., lengthscales=np.ones(len_thetas))
+m = gpflow.models.GPR(data=(thetas_list, y), kernel=k, mean_function=None)
+print_summary(m)
+opt = gpflow.optimizers.Scipy()
+opt_logs = opt.minimize(m.training_loss, m.trainable_variables)
+print_summary(m)
+
+'''
 thetas_list = thetas_list.reshape(-1, len_thetas)
 kernel = GPy.kern.Matern52(input_dim=len_thetas, ARD=True)
 gp = GPy.models.SparseGPRegression(thetas_list, y, kernel)
 gp.optimize(messages=True)
 print(gp)
 print(gp.kern.lengthscale)
-
+'''
 
 # -------------------------------------------------------------------------------- #
 # -------------------------------    Optimization   ------------------------------ #
@@ -266,7 +277,7 @@ print(gp.kern.lengthscale)
 print('\n -------  Optimization  -------')
 
 norms_gp = np.array([mean_thetas, mean_y, std_thetas, std_y])
-loss_kriging = compute_loss_kriging(gp, norm_gp=norm_gp, norms=norms_gp)
+loss_kriging = compute_loss_kriging(m, norm_gp=norm_gp, norms=norms_gp)
 
 if exp=='1d' :
     theta_to_update = [2.5]

@@ -128,13 +128,13 @@ def compute_loss_kriging(gp, norm_gp=False, norms=None) :
         if norm_gp :
             theta_ = (theta_-norms[0])/norms[2]
 
-        err = gp.predict(theta_)[0]
+        err = gp.predict_y(theta_)[0][:,0].numpy()
 
         if norm_gp :
             err = norms[3]*err + norms[1]
 
         print('step error : %.4f.'%err)
-        return err[0,0]
+        return err[0]
 
     return loss_fun
 

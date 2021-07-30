@@ -2,12 +2,11 @@ import matplotlib
 matplotlib.use('Agg')
 
 import numpy as np
-#import GPy
-import gpflow
-from gpflow.utilities import print_summary
+import GPy
 import matplotlib.pyplot as plt
 from L63_mix import Lorenz63
 from data import generate_data
+from mpl_toolkits import mplot3d
 from pyDOE import lhs
 from datetime import datetime
 
@@ -32,13 +31,12 @@ def remove_fp(xt, last_ind=5000) :
 
 # Defining directories, etc.
 today   = datetime.today().strftime('%d%m%Y')
-#today   = '29072021'
 fdir    = 'dataset/'        # root dir
 param   = 'sigmas'          # fixed parameter : sigma=10.
 alpha   = 0.5               # see below : err_obs
 datadir = fdir+today+'/'    # output directory
 tag     = '-a1'             # model to load
-et      = '-1d'             # model to load
+et      = ''                # model to load
 log_errors = True           # log errors for final plot
 
 # Genrating and saving f-data ? 
@@ -64,45 +62,25 @@ train_errors_std = np.load(datadir+'train_errors_std_gp-fhat-a1'+et+'.npz')['arr
 err_obs = (1-alpha)*train_errors_mean + alpha*train_errors_std
 err_obs = err_obs.reshape(-1,1)
 
-'''
+
 # Fitting kriging metamodel
-kernel = GPy.kern.Matern52(input_dim=1, ARD=True)
+kernel = GPy.kern.Matern52(input_dim=2, ARD=True)
 m = GPy.models.GPRegression(train_thetas, err_obs, kernel)
 m.optimize(messages=True)
 print(m)
 print(m.kern.lengthscale)
 
-'''
-
-mean_thetas, std_thetas = np.mean(train_thetas, axis=0), np.std(train_thetas, axis=0)
-mean_y, std_y = np.mean(err_obs, axis=0), np.std(err_obs, axis=0)
-
-norm_gp = True
-if norm_gp :
-    train_thetas = (train_thetas-mean_thetas)/std_thetas
-    err_obs = (err_obs-mean_y)/std_y
-
-
-k = gpflow.kernels.Matern52(1)
-m = gpflow.models.GPR(data=(train_thetas, err_obs), kernel=k, mean_function=None)
-print_summary(m)
-opt = gpflow.optimizers.Scipy()
-opt_logs = opt.minimize(m.training_loss, m.trainable_variables)
-print_summary(m)
-
 
 # Predicting Errors -- final plot
-mesh_len = 20       # number of beta values
-mesh_len_GP = 100   # number of beta values for the GP regressor
+mesh_len = 20       # number of rho or beta values & number of orbits
 
-Thetas_to_predict   = np.linspace(1.5,3.2,mesh_len).reshape(-1,1)
+x, y = np.linspace(26.,32.,mesh_len), np.linspace(1.5,3.2,mesh_len)
+sigmas_rhos = np.array(np.meshgrid(x, y)).T.reshape(-1,2)
+Thetas_to_predict = np.copy(sigmas_rhos)
 
-if norm_gp :
-    Thetas_to_predict_n = (Thetas_to_predict-mean_thetas)/std_thetas
+pred_errors = m.predict(Thetas_to_predict)[0][:,0]
 
-pred_errors         = m.predict_y(Thetas_to_predict_n)[0][:,0].numpy()
-if norm_gp :
-    pred_errors = std_y*pred_errors + mean_y
+
 
 # -------------------------------------------------------------------------------- #
 # ---------------------------------    NN model   -------------------------------- #
@@ -119,11 +97,9 @@ shape   = list(x0.shape)
 shape[-1] = 6
 shape   = tuple(shape)
 ic      = np.zeros(shape)
-ic[...,:3] = x0[...,:3]
+ic[...,:3], ic[...,4:] = x0[...,:3], x0[...,3:]
 sigmas = np.repeat(10.,np.product(shape[:-1])).reshape(shape[:-1])
-rhos = np.repeat(28.,np.product(shape[:-1])).reshape(shape[:-1])
-ic[...,3], ic[...,4], ic[...,5] = sigmas, rhos, x0[...,3]
-x = ic[:,0,5]
+ic[...,3] = sigmas
 
 # Computing errors
 xt_NN_nans = remove_fp(xt_NN)   # removing fixed points
@@ -173,6 +149,8 @@ err_L63 = alpha*err_std_L63 + (1-alpha)*err_mean_L63
 # ----------------------------------    Layout   --------------------------------- #
 # -------------------------------------------------------------------------------- #
 print(' > Plotting layout & optimization.')
+rhos    = Thetas_to_predict[:,0].reshape(mesh_len,mesh_len)
+betas   = Thetas_to_predict[:,1].reshape(mesh_len,mesh_len)
 
 if log_errors :
     err_NN  = np.log(err_NN)
@@ -185,9 +163,14 @@ if log_errors :
 
     pred_errors = np.log(pred_errors+min_pred)
 
+errors_NN   = err_NN.reshape(mesh_len,mesh_len,1)
+errors_L63  = err_L63.reshape(mesh_len,mesh_len,1)
+errors_pred = pred_errors.reshape(mesh_len,mesh_len,1)
+
+x, y        = rhos, betas
 plot_legend = 'sigma=10'
-xlabel  = 'beta'
-truth_x = 8/3
+xlabel, ylabel  = 'rho', 'beta'
+truth_x, truth_y= 28., 8/3
 
 
 # Optimization
@@ -203,10 +186,9 @@ def callbackF(x_) :
     print("theta value : ", x_)
     n_iter += 1
 
-norms_gp = np.array([mean_thetas, mean_y, std_thetas, std_y])
-loss_kriging    = compute_loss_kriging(m, norm_gp=norm_gp, norms=norms_gp)
-theta_to_update = [2.4]         # optimization ic
-bounds = (1.5,3.2)              # bounds (if 'L-BFGS-B' optimizer is used)
+loss_kriging    = compute_loss_kriging(m, norm_gp=False)
+theta_to_update = [27., 2.4]        # optimization ic
+bounds = ((26.5,32.),(1.5,3.2))     # bounds (if 'L-BFGS-B' optimizer is used)
 
 print('   initial theta value : ', theta_to_update)
 eps, tol = 1e-1, 1e-3
@@ -216,20 +198,36 @@ theta_star = res.x
 print('   optimal theta value : ', theta_star,'.\n')
 
 
-# Plotting layout
+
+# Plotting layouts
 print('   --> Plotting layout.')
+fig, ax = plt.subplots(nrows=1, ncols=3, figsize=(15,7))
 
-fig = plt.figure(figsize=(7,5))
+im=ax[0].pcolormesh(x,y,errors_L63[:,:,0], shading='auto', vmin=-3., vmax=1.5)
+ax[0].axvline(truth_x, color='red', ls='--')
+ax[0].axhline(truth_y, color='red', ls='--')
+ax[0].set_xlabel(xlabel)
+ax[0].set_ylabel(ylabel)
+ax[0].set_title('m (obtained with $f$)')
 
-plt.scatter(x, err_L63, color='red', s=25, label='L63')
-plt.scatter(x, err_NN, color='mediumblue', s=15, label='NN')
-plt.plot(Thetas_to_predict, pred_errors, color='mediumblue', lw=1, label='kriging')
-plt.axvline(8/3, color='k', ls='--', lw=1, label='beta')
-plt.axvline(theta_star, color='mediumblue', ls='--', lw=1, label='beta$^*$')
-plt.axvline
-plt.xlabel('beta')
-plt.ylabel('MSE')
+im=ax[1].pcolormesh(x,y,errors_NN[:,:,0], shading='auto', vmin=-3., vmax=1.5)
+ax[1].axvline(truth_x, color='red', ls='--')
+ax[1].axhline(truth_y, color='red', ls='--')
+ax[1].set_xlabel(xlabel)
+ax[1].set_ylabel(ylabel)
+ax[1].set_title('$\hat{m}$ (obtained with $\hat{f}$)')
+#fig.colorbar(im, ax=ax[1])
 
-plt.legend()
-#plt.show()
-plt.savefig('figures/layout'+tag+et+today+'.png')
+im=ax[2].pcolormesh(x,y,errors_pred[:,:,0], shading='auto', vmin=-3., vmax=1.5)
+ax[2].axvline(truth_x, color='red', ls='--')
+ax[2].axhline(truth_y, color='red', ls='--')
+ax[2].set_xlabel(xlabel)
+ax[2].set_ylabel(ylabel)
+ax[2].set_title('kriged m (kriging on $\hat{f}$)')
+fig.colorbar(im, ax=ax[2])
+
+plt.tight_layout()
+plt.savefig('figures/layout-fhat-fhatkrig-'+today+et+'-noNans.png')
+
+
+
