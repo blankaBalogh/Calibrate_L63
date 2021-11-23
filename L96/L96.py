@@ -39,13 +39,16 @@ class Lorenz96():
         mode = self.mode
         
         if mode == 'full_nn':
-            mean_x, mean_y, std_x, std_y = self.nn_model.norms
+            if self.nn_model.norms is not None :
+                mean_x, mean_y, std_x, std_y = self.nn_model.norms
+
             nn_model = self.nn_model.model
 
 
         def func(x):
             '''
             '''
+            n_ic = x.shape[0]
             K,J = self.K, self.J
             dx = np.zeros_like(x)
             h,c,F,b = x[...,-4],x[...,-3],x[...,-2],x[...,-1]
@@ -56,60 +59,70 @@ class Lorenz96():
                 x = x.reshape(1, *x.shape)
             if len(y.shape) == 1 :
                 y = y.reshape(1, *y.shape)             
-            
+           
             ysum = np.sum(y.reshape(-1,K,J), axis=-1) 
 
-            F_arr = np.repeat(F,K).reshape(-1,K)
-            hcb = h*c/b
-            hcb_arr = np.repeat(hcb,K).reshape(-1,K)
-            hcb_yarr = np.repeat(hcb,K*J).reshape(-1,K*J)
-            b_arr, c_arr = np.repeat(b,K*J).reshape(-1,K*J), np.repeat(c,K*J).reshape(-1,K*J)
+            F_arr = np.repeat(F,K).reshape(n_ic,K)
+            hcJ = h*c/b 
+            hcJ_arr = np.repeat(hcJ,K).reshape(n_ic,K)
+            hcJ_yarr = np.repeat(hcJ,K*J).reshape(n_ic,K*J)
+            b_arr = np.repeat(b,K*J).reshape(n_ic,K*J)
+            c_arr = np.repeat(c,K*J).reshape(n_ic,K*J)
 
             # Lorenz'96 model
             if mode == 'lorenz':
-                #print('xk-1 : ', np.array([np.roll(xi,1) for xi in x])[0])
-                #print('xk-2 : ', np.array([np.roll(xi,2) for xi in x])[0])
-                #print('xk+1 : ', np.array([np.roll(xi,-1) for xi in x])[0])
-                #print('F : ', F[0])
-                #print('ysum : ', ysum[0])
-                #print('hcb : ', hcb)
                 dx[...,:K] = -np.array([np.roll(xi,1) for xi in x]) * \
                         (np.array([np.roll(xi,2) for xi in x]) - \
                         np.array([np.roll(xi,-1) for xi in x])) \
-                        -x+F_arr-hcb_arr*ysum
+                        -x+F_arr-hcJ_arr*ysum
                 dx[...,K:K+(K*J)] = -b_arr*c_arr*np.array([np.roll(yi,-1) for yi in y])* \
                         (np.array([np.roll(yi,-2) for yi in y]) - \
                         np.array([np.roll(yi,1) for yi in y]))- \
-                        c_arr*y+hcb_yarr*np.repeat(x, J).reshape(-1,K*J)
+                        c_arr*y+hcJ_yarr*np.repeat(x, J).reshape(-1,K*J)
+                """
+
+                for i,(xi,yi) in enumerate(zip(x,y)) :
+                    dx[i,:K] = -np.roll(xi,1)*(np.roll(xi,2)-np.roll(xi,-1))-xi-F[i]-hcJ[i]*ysum[i]
+                    dx[i,K:K*J+K] = -c[i]*b[i]*np.roll(yi,-1)*(np.roll(yi,-2)-np.roll(yi,i))-\
+                            c[i]*yi+hcJ[i]*(np.repeat(xi,J).reshape(K*J))
+                """
 
             elif mode == 'full_nn' :
-                xn = (x-mean_x)/std_x
-                xn = xn.reshape(-1,K)
-                b = np.array(b).reshape(-1,b.shape[0])
-                B = (nn_model.predict([xn,b]))*std_y+mean_y
+                if self.nn_model.norms is not None :
+                    xn = (x-mean_x)/std_x
+                    xn = xn.reshape()
+                    b = np.repeat(b).reshape(n_ic*K,1)
+                    B = (nn_model.predict([xn,b]))*std_y+mean_y
+                else :
+                    #print('x shape : ', x.shape)
+                    b = np.repeat(b,K).reshape(-1,1)
+                    x_ = np.copy(x).reshape(-1,1)
+                    #print('b shape : ', b.shape)
+                    B = nn_model.predict([x_,b])
+                    B = B.reshape(-1,K)
 
                 dx[...,:K] = -np.array([np.roll(xi,1) for xi in x]) * \
                         (np.array([np.roll(xi,2) for xi in x]) - \
                         np.array([np.roll(xi,-1) for xi in x])) \
-                        -x+B
+                        -x+F_arr+B
 
                 dx[...,K:K+K*J] = -b_arr*c_arr*np.array([np.roll(yi,-1) for yi in y])* \
                         (np.array([np.roll(yi,-2) for yi in y]) - \
                         np.array([np.roll(yi,1) for yi in y]))- \
-                        c_arr*y+hcb_yarr*np.repeat(x, J).reshape(-1,K*J)
+                        c_arr*y+hcJ_yarr*np.repeat(x, J).reshape(-1,K*J)
 
             elif mode == 'polynom' :
                 b0,b1,b2,b3 = -0.198,0.575,-0.00550,-0.000223
-                Up = F-(b0+b1*x+b2*x**2+b3*x**3)
+                Up = -(b0+b1*x+b2*x**2+b3*x**3)
                 dx[...,:K] = -np.array([np.roll(xi,1) for xi in x]) * \
                         (np.array([np.roll(xi,2) for xi in x]) - \
                         np.array([np.roll(xi,-1) for xi in x])) \
-                        -x+Up
+                        -x+F+Up
 
                 dx[...,K:K+K*J] = -b_arr*c_arr*np.array([np.roll(yi,-1) for yi in y])* \
                         (np.array([np.roll(yi,-2) for yi in y]) - \
                         np.array([np.roll(yi,1) for yi in y]))- \
-                        c_arr*y+hcb_yarr*np.repeat(x, J).reshape(-1,K*J)
+                        c_arr*y+hcJ_yarr*np.repeat(x, J).reshape(-1,K*J)
  
             
             """

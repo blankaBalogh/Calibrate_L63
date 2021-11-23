@@ -5,7 +5,7 @@ from ML_model import ML_model, train_ML_model
 from data import generate_data, generate_LHS, generate_data_solvers, generate_x0 
 from metrics import *
 from tensorflow.keras.callbacks import ModelCheckpoint, LearningRateScheduler
-import tensorflow.keras.backend as Kb
+import tensorflow.keras.backend as K
 
 
 # Sharing available GPU resources
@@ -34,38 +34,33 @@ args    = parser.parse_args()
 
 # Setting up script parameters
 tag         = '-a2' #'-a'+str(args.learning_sample)
-extra_tag   = ''    #args.extra_tag
-exp         = '1d'  #args.experience
+extra_tag   = '' #args.extra_tag
+exp         = '1d' #args.experience
 
 if exp == '2d' :
     extra_tag = extra_tag+'-2d'
-
-
-if tag == '-a1' : learning_sample = 'LHS'
-else : learning_sample = 'orbits'
-
-print('\n > Learning sample : %s.'%learning_sample)
 
 
 # -------------------------------------------------------------------------------- #
 # ----------------    2nd EXPERIMENT : LEARNING dx = f(x,theta)   ---------------- #
 # -------------------------------------------------------------------------------- #
 
-
 # Getting R2 score for validation.
 def r2_score_keras(y_truth, y_pred) : 
     '''
     R2-score using numpy arrays. 
     '''
-    import tensorflow.keras.backend as Kb
+    import tensorflow.keras.backend as K
+    print('y_truth shape : ', y_truth.shape)
+    print('y_pred shape : ', y_pred.shape)
     y_truth = tf.convert_to_tensor(y_truth)
     y_pred = tf.convert_to_tensor(y_pred)
-    num = Kb.sum((y_truth - y_pred)**2)
-    denom = Kb.sum((y_truth - Kb.mean(y_truth, axis=0))**2)
+    num = K.sum((y_truth - y_pred)**2)
+    denom = K.sum((y_truth - K.mean(y_truth, axis=0))**2)
     return (1-num/denom)
 
 
-
+'''
 print(' > Loading learning sample. ')
 
 # Loading 'orbits' learning sample
@@ -84,7 +79,6 @@ if tag=='-a1' :
     x_data = np.load('data/x_data-a1'+extra_tag+'.npz')['arr_0'][0]
     y_data = np.load('data/y_data-a1'+extra_tag+'.npz')['arr_0'][0]
 
-x_data, y_data = x_data[25:], y_data[25:]
 x_data_, y_data_ = np.copy(x_data), np.copy(y_data)
 x_data = x_data.T.reshape(x_data.shape[-1],-1).T
 y_data = y_data.T.reshape(y_data.shape[-1],-1).T
@@ -93,22 +87,17 @@ y_data = y_data.T.reshape(y_data.shape[-1],-1).T
 K = x_data.shape[-1]-4 
 J = int(y_data.shape[-1]/K)
 
-#h,c,F,b = x_data[...,-4], x_data[...,-3], x_data[...,-2], x_data[...,-1]
-#h = np.repeat(h,K).reshape(-1,1)
-#c = np.repeat(c,K).reshape(-1,1)
-#F = np.repeat(F,K).reshape(-1,1)
-#b = np.repeat(b,K).reshape(-1,1)
-h,c,F,b = x_data[0,-4],x_data[0,-3],x_data[0,-2],x_data[0,-1]
-print('c : ', c)
-print('F : ', F)
+h,c,F,b = x_data[...,-4], x_data[...,-3], x_data[...,-2], x_data[...,-1]
+h = np.repeat(h,K).reshape(-1,1)
+c = np.repeat(c,K).reshape(-1,1)
+F = np.repeat(F,K).reshape(-1,1)
+b = np.repeat(b,K).reshape(-1,1)
 
 u_data  = -(h*c/b)*np.sum(y_data.reshape(y_data.shape[0],K,J),axis=-1).reshape(-1,1)
 u_data  = u_data.reshape(-1,1)
 x_data_x= x_data[...,:K].reshape(-1,1)
-x_data_c= np.repeat(x_data[...,-3],K).reshape(-1,1)
-print('x data b : ', x_data_b.shape)
-print('x data x : ', x_data_x.shape)
-x_data = np.concatenate((x_data_x, x_data_c),axis=-1)
+x_data_b= b.reshape(-1,1)
+x_data = np.concatenate((x_data_x, x_data_b),axis=-1)
 
 #del y_data
 
@@ -121,86 +110,95 @@ if norm_input :
     x_data = (x_data-mean_x)/std_x
     u_data = (u_data-mean_u)/std_u
 
-#x_data_ = np.copy(x_data)
-#x_data = x_data[...,0].reshape(-1,1)
+x_data_ = np.copy(x_data)
+x_data = x_data[...,0].reshape(-1,1)
+'''
 
 # Setting up NN model
 layers = [32,32]
-n_epochs    = 15
-dic_NN      = {'name':'f_lhs', 'in_dim':x_data.shape[-1], 'out_dim':1, 'nlays':layers, 
+n_epochs    = 30
+dic_NN      = {'name':'f_lhs', 'in_dim':1, 'out_dim':1, 'nlays':layers, 
     'dropout':False, 'exp':exp}
+
+# Loading model 1
 nn_L96      = ML_model(dic_NN)
 
 nn_model = nn_L96.model
 print(nn_model.summary())
 
 
-from sklearn.model_selection import train_test_split
-x_train, x_test, u_train, u_test = train_test_split(x_data, u_data, 
-                test_size=0.15, random_state=42)
+#from sklearn.model_selection import train_test_split
+#x_train, x_test, u_train, u_test = train_test_split(x_data, u_data, 
+#                test_size=0.15, random_state=42)
 
-ckpt_10e = ModelCheckpoint('weights/weights-b0'+extra_tag+'.h5', 
-            monitor='val_r2_score_keras', save_weights_only=True, verbose=1, mode="max",
-            period=10)
-ckpt_best = ModelCheckpoint('weights/best-weights-b0'+extra_tag+'.h5', 
-            monitor='val_r2_score_keras', save_best_only=True, verbose=1, mode="max")
+#ckpt_10e = ModelCheckpoint('weights/weights-b0.h5', 
+#            monitor='val_r2_score_keras', save_weights_only=True, verbose=1, mode="max",
+#            period=10)
+#ckpt_best = ModelCheckpoint('weights/best-weights-b0.h5', 
+#            monitor='val_r2_score_keras', save_best_only=True, verbose=1, mode="max")
 
 learning_rate = 1e-3
+K,J = 8,32
 loss_fn = tf.keras.losses.MeanSquaredError()        # loss function. Can be custom. 
 optim   = tf.keras.optimizers.Adam(learning_rate)
 
 nn_model.compile(loss=loss_fn, optimizer=optim, metrics=[r2_score_keras])
 
-
-print(' > Training NN model.')
-valid_data = ([x_test[...,0], x_test[...,1]], u_test)
-history = nn_model.fit([x_train[...,0], x_train[...,1]], u_train, epochs=n_epochs,
-        batch_size=32, verbose=0, validation_data=valid_data, 
-        callbacks=[ckpt_10e, ckpt_best])
-#train_ML_model(x_data, u_data, nn_L96, batch_size=32, n_epochs=n_epochs, 
-#        split_mode='random', split_ratio=0.15)
-
-
 print(' > Loading model weights.')
-nn_model.load_weights('weights/best-weights-b0'+extra_tag+'.h5')
+nn_model_c5 = nn_model
+nn_model_c5.load_weights('weights/best-weights-b0_b5.h5')
 
-"""
-# Plotting results
+# Loading model 2
+nn_L96_c10  = ML_model(dic_NN)
+
+nn_model_c10 = nn_L96_c10.model
+print(nn_model_c10.summary())
+nn_model_c10.compile(loss=loss_fn, optimizer=optim, metrics=[r2_score_keras])
+nn_model_c10.load_weights('weights/best-weights-b0_b10.h5')
+
+print(' > Done.')
+
+
+
+# Plotting
 import matplotlib.pyplot as plt
-xt_truth = np.load('data/xt_truth'+extra_tag+'.npz')['arr_0'][:,0]
-yt_truth = np.load('data/yt_truth'+extra_tag+'.npz')['arr_0'][:,0]
 
-h,c = 1.,10.
-ysum = np.sum(yt_truth.reshape(yt_truth.shape[0],K,J),axis=-1)
-B_truth = (-(h*c/b)*ysum).reshape(-1,1)
-print('B_truth shape : ', B_truth.shape)
-print('xt_truth shape : ', xt_truth.shape)
-xt_truth = xt_truth[...,:K].reshape(-1,1)
-b = np.repeat(10., xt_truth.shape[0]).reshape(-1,1)
-B_pred = nn_model.predict([xt_truth,b])
-B_ptrain = nn_model.predict([x_data[:,0], x_data[:,1]])
+xt_truth_c5 = np.load('data/xt_truth_b5.npz')['arr_0'][:,0]
+yt_truth_c5 = np.load('data/yt_truth_b5.npz')['arr_0'][:,0]
+xt_truth_c10 = np.load('data/xt_truth_b10.npz')['arr_0'][:,0]
+yt_truth_c10 = np.load('data/yt_truth_b10.npz')['arr_0'][:,0]
 
-fig, ax = plt.subplots(ncols=2)
+ysum_c5 = np.sum(yt_truth_c5.reshape(yt_truth_c5.shape[0],K,J),axis=-1)
+ysum_c10 = np.sum(yt_truth_c10.reshape(yt_truth_c10.shape[0],K,J),axis=-1)
+h,c = 1.,10. 
+B_c5 = (-h*c/5.)*ysum_c5
+B_c10 = (-h*c/10.)*ysum_c10
 
-ax[0].scatter(x_data[:,0], u_data, label='truth', marker='+', s=1)
-ax[0].scatter(x_data[:,0], B_ptrain, label='pred', marker='+', s=1)
+Bpred_c10 = nn_model_c10.predict(xt_truth_c10[:,0])
+Bpred_c5 = nn_model_c5.predict(xt_truth_c5[:,0])
+
+
+
+
+#xt_truth,yt_truth=np.load('data/xt_truth.npz')['arr_0'],np.load('data/yt_truth.npz')['arr_0']
+#xt_truth = xt_truth[:,0]
+#ysum = np.sum(yt_truth[:,0].reshape(yt_truth.shape[0],K,J),axis=-1)
+#h,c,F,b = xt_truth[0,-4],xt_truth[0,-3],xt_truth[0,-2],xt_truth[0,-1]
+#B = (-h*c/b)*ysum[:,0]
+#Bpred = nn_model.predict(xt_truth[:,0].reshape(-1,1))
+
+plt.scatter(xt_truth_c5[:,0],B_c5[:,0],label='truth b=5',marker='+',s=1,color='red')
+plt.scatter(xt_truth_c10[:,0],B_c10[:,0],label='truth b=10',marker='+',s=1,color='royalblue')
+plt.scatter(xt_truth_c5[:,0],Bpred_c5,label='pred b=5',marker='+',s=1,color='darkred')
+plt.scatter(xt_truth_c10[:,0],Bpred_c10,label='pred b=10',marker='+',s=1,color='darkblue')
+plt.xlabel(r'$X$')
+plt.ylabel(r'$B$')
 plt.legend()
-ax[0].set_xlabel(r'$X$')
-ax[0].set_ylabel(r'$B$')
-ax[0].set_title('train')
-
-ax[1].scatter(xt_truth, B_truth, label='truth',marker='+', s=1)
-ax[1].scatter(xt_truth, B_pred, label='pred', marker='+', s=1)
-plt.legend()
-ax[1].set_xlabel(r'$X$')
-ax[1].set_ylabel(r'$B$')
-ax[1].set_title('truth')
-
 plt.show()
 
 
 
-"""
+
 
 
 

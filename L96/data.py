@@ -244,11 +244,11 @@ def generate_data(dynamical_model, x0, n_steps=100, dt=0.01, \
         xt = orbits(f, x0, n_steps=n_steps, dt=dt, solver=solver, method=method, 
                 x_bounds=x_bounds)
     K,J = dynamical_model.K, dynamical_model.J
-    output['x'] = xt[...,:K]
+    output['x'] = xt[...,list(np.arange(K))+[-4,-3,-2,-1]]
     output['y'] = xt[...,K:K+K*J]
-    output['F'] = xt[...,-1]
-    output['b'] = xt[...,-2]
-    output['h'], output['c'] = xt[...,-4], xt[...,-3]
+    #output['F'] = xt[...,-2]
+    #output['b'] = xt[...,-1]
+    #output['h'], output['c'] = xt[...,-4], xt[...,-3]
     
     if compute_y:
         yt = np.zeros((n_steps, x0.shape[0], K*(J+1)))
