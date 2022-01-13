@@ -117,6 +117,8 @@ class ML_model():
                 x = (x-self.norms[0])/self.norms[2]
             
             x_, theta_ = x[...,:1], x[...,-1]
+            print('theta : ', theta_)
+            print('NN')
 
             ishp1 = x.shape
             
@@ -206,7 +208,7 @@ def train_ML_model(x_data, u_data, NN_model, batch_size=32, learning_rate=0.001,
     # To monitor the fit of the model, weights are also saved every 10 epochs.
     n_train = x_train.shape[0]
     n_batch_per_epoch = int(n_train/batch_size)
-    n_save_epochs = 10
+    n_save_epochs = 2
     ckpt_10e = ModelCheckpoint('weights/weights'+NN_model.suffix+'-e{epoch:02d}.h5', 
             monitor='val_r2_score_keras', save_weights_only=True, verbose=1, mode="max",
             period=10)

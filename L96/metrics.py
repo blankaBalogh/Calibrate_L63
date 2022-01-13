@@ -1,6 +1,6 @@
 import numpy as np
 from data import *
-
+import tensorflow as tf
 
 
 # Loss functions
@@ -102,5 +102,22 @@ def compute_STDloss_kriging(gp, std_truth, norm_gp=False, norms=None) :
         return err
 
     return loss_fun
+
+
+# Getting R2 score for validation.
+def r2_score_keras(y_truth, y_pred) : 
+    '''
+    R2-score using numpy arrays. 
+    '''
+    import tensorflow.keras.backend as K
+    print('y_truth shape : ', y_truth.shape)
+    print('y_pred shape : ', y_pred.shape)
+    y_truth = tf.convert_to_tensor(y_truth)
+    y_pred = tf.convert_to_tensor(y_pred)
+    num = K.sum((y_truth - y_pred)**2)
+    denom = K.sum((y_truth - K.mean(y_truth, axis=0))**2)
+    return (1-num/denom)
+
+
 
 

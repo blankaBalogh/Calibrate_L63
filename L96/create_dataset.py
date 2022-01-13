@@ -7,7 +7,7 @@ from data import generate_data
 K, J = 8, 32
 n_ts = 1000
 # The function below creates the dataset
-def create_dataset(K, J, min_bounds, max_bounds, N_ic=100, N_steps=1, dt=0.05, 
+def create_dataset(K, J, min_bounds, max_bounds, N_ic=100, N_steps=1, dt=0.001, 
         compute_y=False, mode='standard'):
     '''
     Creates either an LHS (i.e., N_steps=1) or an orbit dataset. 
@@ -15,8 +15,8 @@ def create_dataset(K, J, min_bounds, max_bounds, N_ic=100, N_steps=1, dt=0.05,
     # LHS sample of 'initial conditions + parameters' (size : N_ic)
     #x_lhs_ic = lhs(6, samples=N_ic, criterion="center")*(max_bounds - min_bounds) + min_bounds
     np.random.seed(42)
-    #x0 = (max_bounds-min_bounds)*lhs((K+K*J+4), N_ic)+min_bounds
-    x0 = (max_bounds-min_bounds)*np.random.random((N_ic,K+K*J+4))+min_bounds
+    x0 = (max_bounds-min_bounds)*lhs((K+K*J+4), N_ic)+min_bounds
+    #x0 = (max_bounds-min_bounds)*np.random.random((N_ic,K+K*J+4))+min_bounds
     h,c,b,F = x0[...,-4], x0[...,-3], x0[...,-2], x0[...,-1]
     #x0,y0 = x0[...,:K],x0[...,K:K+K*J]
     
@@ -26,7 +26,8 @@ def create_dataset(K, J, min_bounds, max_bounds, N_ic=100, N_steps=1, dt=0.05,
 
     # Getting data for multiple parameterizations
     L96 = Lorenz96(dict_L96)
-    output = generate_data(L96, x0=x0, n_steps=N_steps, dt=dt, compute_y=compute_y)
+    output = generate_data(L96, x0=x0, n_steps=N_steps, dt=dt, compute_y=compute_y,
+            method='RK4')
     #output['F'] = F
     #output['b'] = b
     return output
@@ -62,7 +63,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # Truth value of Lorenz'63 parameters
-    h0, c0, F0, b0 = 1., 10., 20., 10.
+    h0, c0, F0, b0 = 1., 10., 10., 10.
     
     exp         = args.experience   # 'truth, '2d' or '1d'
     extra_tag   = args.extra_tag    # specific name of the learning sample
@@ -73,8 +74,8 @@ if __name__ == '__main__':
     mode        = args.mode         # Experience type : 'lorenz' or 'polynom'
 
     # Lorenz parameters' ranges
-    min_bounds = np.array([0]*K+[0]*(K*J)+[0.5,8.,8.,8.])
-    max_bounds = np.array([1]*K+[1]*(K*J)+[1.5,12.,12.,12.])
+    min_bounds = np.array([0]*K+[0]*(K*J)+[0.5,6.,8.,8.])
+    max_bounds = np.array([1]*K+[1]*(K*J)+[1.5,14.,12.,12.])
 
     # Configuration of the learning sample
     # Generating 'truth' dataset (i.e., theta=(10.,28.,8/3))
@@ -111,7 +112,7 @@ if __name__ == '__main__':
     # Generating learning sample
     compute_y = True
     output = create_dataset(K, J, min_bounds, max_bounds, N_ic=N_ic, N_steps=N_steps, 
-            dt=0.01, compute_y=compute_y, mode=mode)
+            dt=0.005, compute_y=compute_y, mode=mode)
     x_data, y_data = output['x'], output['y']
     #F, b = output['F'], output['b']
     dx, dy = output['dx'], output['dy']
@@ -133,10 +134,10 @@ if __name__ == '__main__':
 
     # 'truth' datasets are saved under another filename
     if exp == 'truth' :
-        fname_x = root+'xt_truth'#_b'+str(int(b0))
-        fname_y = root+'yt_truth'#_b'+str(int(b0))
-        fname_dx = root+'dx_truth'#_b'+str(int(b0))
-        fname_dy = root+'dy_truth'#_b'+str(int(b0))
+        fname_x = root+'xt_truth'
+        fname_y = root+'yt_truth'
+        fname_dx = root+'dx_truth'
+        fname_dy = root+'dy_truth'
 
         if mode == 'polynom' :
             fname_x, fname_y = fname_x+'-polynom', fname_y+'-polynom'
@@ -152,9 +153,9 @@ if __name__ == '__main__':
     np.savez_compressed(fname_y, y_data)
 
         
-    if compute_y :
-        np.savez_compressed(fname_dx, dx)
-        np.savez_compressed(fname_dy, dy)
+    #if compute_y :
+    #    np.savez_compressed(fname_dx, dx)
+    #    np.savez_compressed(fname_dy, dy)
 
     print(' > Dataset of size ', y_data.shape, 
             ' successfully saved to %s.'% fname_y)

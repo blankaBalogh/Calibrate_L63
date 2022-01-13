@@ -22,6 +22,7 @@ class Lorenz96():
         self.F = 20.
         self.K = 8
         self.J = 32
+        self.lm = None
         self.nn_model = None
         
         self.set_params(dic)
@@ -91,14 +92,14 @@ class Lorenz96():
                 if self.nn_model.norms is not None :
                     xn = (x-mean_x)/std_x
                     xn = xn.reshape()
-                    b = np.repeat(b).reshape(n_ic*K,1)
+                    c = np.repeat(c).reshape(n_ic*K,1)
                     B = (nn_model.predict([xn,b]))*std_y+mean_y
                 else :
                     #print('x shape : ', x.shape)
-                    b = np.repeat(b,K).reshape(-1,1)
+                    c = np.repeat(c,K).reshape(-1,1)
                     x_ = np.copy(x).reshape(-1,1)
                     #print('b shape : ', b.shape)
-                    B = nn_model.predict([x_,b])
+                    B = nn_model.predict([x_,c])
                     B = B.reshape(-1,K)
 
                 dx[...,:K] = -np.array([np.roll(xi,1) for xi in x]) * \
@@ -123,6 +124,41 @@ class Lorenz96():
                         (np.array([np.roll(yi,-2) for yi in y]) - \
                         np.array([np.roll(yi,1) for yi in y]))- \
                         c_arr*y+hcJ_yarr*np.repeat(x, J).reshape(-1,K*J)
+
+            elif mode == 'linear_regression' :
+                #print(' > mode : linear regression.')
+                #print('x shape : ', x)
+                B = self.lm.predict(x.reshape(-1,1))
+                #print(self.lm.coef_, self.lm.intercept_)
+                B = B.reshape(1,-1)
+                #print(' B : ', B)
+                dx[...,:K] = -np.array([np.roll(xi,1) for xi in x]) * \
+                        (np.array([np.roll(xi,2) for xi in x]) - \
+                        np.array([np.roll(xi,-1) for xi in x])) \
+                        -x+F_arr+B
+
+                dx[...,K:K+K*J] = -b_arr*c_arr*np.array([np.roll(yi,-1) for yi in y])* \
+                        (np.array([np.roll(yi,-2) for yi in y]) - \
+                        np.array([np.roll(yi,1) for yi in y]))- \
+                        c_arr*y+hcJ_yarr*np.repeat(x, J).reshape(-1,K*J)
+
+            elif mode == 'nn' :
+                #print(' > mode : linear regression.')
+                #print('x shape : ', x)
+                c = np.repeat(c,K).reshape(-1,1)
+                B = self.nn_model.model.predict([x.reshape(-1,1), c])
+                #print(self.lm.coef_, self.lm.intercept_)
+                B = B.reshape(1,-1)
+                #print(' B : ', B)
+                dx[...,:K] = -np.array([np.roll(xi,1) for xi in x]) * \
+                        (np.array([np.roll(xi,2) for xi in x]) - \
+                        np.array([np.roll(xi,-1) for xi in x])) \
+                        -x+F_arr+B
+
+                dx[...,K:K+K*J] = -b_arr*c_arr*np.array([np.roll(yi,-1) for yi in y])* \
+                        (np.array([np.roll(yi,-2) for yi in y]) - \
+                        np.array([np.roll(yi,1) for yi in y]))- \
+                        c_arr*y+hcJ_yarr*np.repeat(x, J).reshape(-1,K*J) 
  
             
             """
